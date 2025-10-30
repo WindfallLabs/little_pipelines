@@ -1,6 +1,6 @@
 import sys
 
-from loguru import logger
+from loguru import logger, _Logger
 from loguru._defaults import LOGURU_FORMAT
 
 
@@ -13,7 +13,28 @@ logger.level("APP", no=20, color="<cyan>")
 logger.level("PERF", no=20, color="<light-black>")
 
 
-def make_logger(name, filename, level="DEBUG", retention="30 days", rotation="1 MB", format=LOGURU_FORMAT):
+def _patch(logger: _Logger) -> _Logger:
+    """Custom color-patch."""
+    logger.log = logger.opt(colors=True).log
+    logger.debug = logger.opt(colors=True).debug
+    logger.info = logger.opt(colors=True).info
+    logger.warning = logger.opt(colors=True).warning
+    logger.error = logger.opt(colors=True).error
+    logger.critical = logger.opt(colors=True).critical
+    logger.success = logger.opt(colors=True).success
+
+    return logger
+
+
+def make_logger(
+    name,
+    filename,
+    level="DEBUG",
+    colorize=False,
+    retention="30 days",
+    rotation="1 MB",
+    format=LOGURU_FORMAT
+) -> _Logger:
     """
     Create a logger with consistent configuration.
     
@@ -36,14 +57,17 @@ def make_logger(name, filename, level="DEBUG", retention="30 days", rotation="1 
     
     bound_logger.add(
         filename,
-        format=LOGURU_FORMAT,
-        #colorize=True,
+        format=format,
+        colorize=colorize,
         filter=lambda record: record["extra"].get("logger_name") == name,
         rotation=rotation,
         retention=retention,
         level=level
     )
-    
+
+    # Monkey-patched color fixes
+    bound_logger = _patch(bound_logger)
+
     return bound_logger
 
 
@@ -61,6 +85,9 @@ def make_app_logger(level="INFO"):
         level=level,
         colorize=True
     )
+    # Monkey-patched color fixes
+    app_logger = _patch(app_logger)
+
     return app_logger
 
 

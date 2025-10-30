@@ -1,48 +1,151 @@
 # Little Pipelines - A Lightweight Task Pipeline Framework
 
-Little Pipelines is a Python library for building and executing data pipelines with intelligent caching, dependency management, and execution tracking. It provides a simple, Luigi-inspired approach to orchestrating tasks while maintaining minimal dependencies and complexity.
+Little Pipelines is a Python library for building and executing data pipelines with intelligent execution, results caching, and dependency management. It provides a simple approach to orchestrating tasks while maintaining minimal dependencies and complexity.  
 
-## Highlightable Features
+This library is intended for individual analysts or small teams who need simple, cacheable data pipelines without the complexity of enterprise workflow orchestration tools (e.g., Luigi, Airflow, Prefect, dbt, etc.) or cloud-based ETL platforms (e.g., Dagster, AWS Step Functions, etc.).  
 
-### 🔄 **Smart Caching & Checkpointing**
-- Automatic result caching using `diskcache` for efficient pipeline resumption
-- Intelligent cache invalidation based on:
-  - Script changes (hashes the entire module file where tasks are defined)
-  - Input file modifications (hashes input files when specified)
-- Flexible expiration policies (session-based, time-based, or permanent)
+Free and Open Source under the [MIT License](https://mit-license.org/), and built with the love and support of the [Missoula Urban Transporation District](https://mountainline.com/about/).  
 
-### 📊 **Dependency Management**
-- Declarative task dependencies with automatic topological sorting
-- Tasks execute in the correct order based on their dependency graph
-- Built-in validation to ensure all dependencies are satisfied
+## Key Features
 
-### ⚡ **Execution Control**
-- **Selective execution**: Skip specific tasks or force re-execution of others
-- **Force mode**: Clear all cached results and run everything fresh
-- **Automatic skip**: Reuses cached results when scripts and inputs haven't changed
-- Performance timing for each task's execution
+- **Automatic dependency resolution** - Declare dependencies by name and let the pipeline handle execution order
+- **Declarative task/process definitions** - Define Pythonic Task functions without worrying about what's going on under the hood
+- **Intelligent caching** - Skip task execution if cached results are still "fresh" and the task definition or inputs haven't changed
+- **Flexible cache expiration** - Control when results expire (session-based, time-based, or never)
+- **Built-in performance tracking** - Automatic timing for each task's execution
+- **Pre-configured logging** - Per-task loggers with configurable output using `loguru`
+- **Optional interactive shell** - Subclassable `Shell` class for building custom CLI tools (work-in-progress)
+- **Minimal dependencies** - Only requires `diskcache`, `loguru`, and `rich`
 
-### 🎯 **Flexible Expiry Strategies**
-Rich set of cache expiration options:
-- `session()` - Expires when Python exits
-- `never()` - Permanent cache
-- `at_midnight()` - Expires at next midnight
-- `from_now()` / `from_today()` - Time-delta based expiration
-- `at_datetime()` - Expire at specific date/time
 
-### 📝 **Integrated Logging**
-- Per-task loggers using `loguru`
-- Performance metrics tracking (`PERF` level)
-- Configurable log levels and output formatting
+## Some Super Simple Examples
 
-### 🖥️ **Interactive Shell** (Optional)
-- Built-in CLI shell for pipeline inspection and execution
-- Commands for task listing, execution, validation, and log level control
-- Powered by Rich for beautiful terminal output
+### Example 1
+```python
+from time import sleep
 
-### 🏗️ **Clean Architecture**
-- Task-based abstraction with `@process` decorator for custom functions
-- Minimal external dependencies (diskcache, loguru, rich)
-- Type hints throughout for better IDE support
+import little_pipelines as lp
 
-This library is ideal for data scientists and engineers who need straightforward pipeline orchestration without the overhead of enterprise workflow tools, while still getting essential features like caching, dependency resolution, and execution tracking.
+task1 = lp.Task("TaskOne")
+
+@task1.process
+def run(this):
+    sleep(0.1)  # Emulate processing time
+    return 1
+
+
+task2 = lp.Task("TaskTwo")
+
+@task2.process
+def extract(this):
+    """A sub-process"""
+    sleep(1.5)  # Emulate processing time
+    return 1
+
+@task2.process
+def transform(this, ext: int):
+    """A sub-process"""
+    sleep(1)  # Emulate processing time
+    return ext + 1
+
+@task2.process
+def run(this):
+    raw_data = this.extract()
+    data = this.transform(raw_data)
+    return data
+
+task3 = lp.Task(
+    "TaskThree",
+    # LOOK: here we tell the pipeline to expire the results upon pipeline completion
+    expire_results=lp.expire.on_complete("TaskThree"),
+)
+
+@task3.process
+def run(this):
+    sleep(.3)  # Emulate processing time
+    return 3
+
+sum_task = lp.Task(
+    "Sum",
+    dependencies=["TaskOne", "TaskTwo", "TaskThree"]
+)
+
+@sum_task.process
+def run(this):
+    sleep(.25)  # Emulate processing time
+    r1 = this.pipeline.get_result("TaskOne")
+    r2 = this.pipeline.get_result("TaskTwo")
+    r3 = this.pipeline.get_result("TaskThree")
+    return r1 + r2 + r3
+
+def run():
+    pipeline = lp.Pipeline("Example1")
+    pipeline.add(task1, task2, task3, sum_task)
+    pipeline.execute()
+
+    print("Final Result: ", pipeline.get_result("Sum"))  # 6
+    return
+
+
+run()
+
+```
+
+_Console output showing initial execution and when using cached results_  
+<img src="resources/Example1.png">  
+
+Notice how TaskThree was executed on the second run becauase of the `expire.on_complete()` expiry.
+
+### Example 2
+```python
+import little_pipelines as lp
+
+zero = lp.Task("Zero")
+
+
+@zero.process
+def run(this):  # 'run' is a required decorated function
+    return ["Some", "values"]
+
+
+one = lp.Task(
+    name="One",
+    dependencies=["Zero"]  # Task One should execute after Zero
+)
+
+
+@one.process
+def preflight(this):  # Some optional process
+    return "OK"
+
+
+@one.process
+def run(this):  # 'this' is a self-like reference to the Task instance
+    status = this.preflight()
+    
+    # Get data from dependency / upstream task
+    data: list[str] = this.pipeline.get_result("Zero")
+    # Manipulate it
+    data.extend(["more", "values", status])
+    return data  # ["Some", "values", "more", "values", "OK"]
+
+
+pipeline = lp.Pipeline("tests")
+pipeline.add(one, zero)  # Order doesn't matter
+pipeline.execute()
+
+print(pipeline.get_result("One"))  # '["Some", "values", "more", "values", "OK"]'
+
+```
+
+## The Big Picture
+
+In short, Little Pipelines lets you mix ETL operations, SQL transformations, Python data processing, API calls, and file operations in a single pipeline. First, users define `Tasks` and `add()` them to a `Pipeline`.  
+Under the hood, the Pipeline coordinates Task execution using Python's `graphlib.TopologicalSorter`, and handles the caching of results using [diskcache.Cache](https://grantjenks.com/docs/diskcache/tutorial.html#cache). Tasks are automatically configured with a [loguru](https://loguru.readthedocs.io/en/stable/overview.html) file-logger which logs to `.little_pipelines/<pipeline_name>/logs` (located in your user or home directory).  
+
+Tasks can have dependencies (require the execution of other tasks before it). Dependencies are explicitly listed by name at the initialization of Tasks. Dependency management (topological sorting) is done automatically by the Pipeline instances's `tasks` property. So you could skip the built-in `execute()` method and hack something as dead-simple as:
+
+```python
+for task in pipeline.tasks:
+    task.run()
+```

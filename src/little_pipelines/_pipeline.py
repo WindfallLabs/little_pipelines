@@ -2,8 +2,11 @@
 
 from graphlib import TopologicalSorter
 from pathlib import Path
-from typing import Optional, Generator
+from time import perf_counter_ns
+from typing import Any, Callable, Optional, Generator
 
+from . import util
+from . import expire
 from ._cache import get_cache
 from ._logger import app_logger
 from ._tasks import Task
@@ -16,29 +19,42 @@ class Pipeline:
 
     def __init__(
         self,
-        name: str,
-        cache_name: Optional[Path] = None
+        name: str = "default",
     ):
         """
         Initialize a pipeline.
 
         Args:
-            name: Pipeline name (used for cache directory)
+            name: Pipeline name (names the cache's parent folder)
             cache_dir: Custom cache directory (default: %USER%/.little_pipelines/{name})
         """
         self.name = name
-        self.cache = get_cache(cache_name)
+        self.cache = get_cache(name)
         self._tasks: list[Task] = []
         self.ignored_tasks: list[str] = []
         self.forced_tasks: list[str] = []
 
+        self._log_dir: Optional[Path] = None
+
+        # Optional callback functions
+        self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
+        self._on_fail: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
+
     @property
     def is_complete(self) -> bool:
-        return all([task.is_executed for task in self.tasks])
+        """If all Pipeline Tasks have been completed."""
+        return all([task.is_executed or task.is_skipped for task in self.tasks])
+
+    @property
+    def log_dir(self):
+        """Pipeline-specific log directory."""
+        if self._log_dir:
+            return self._log_dir
+        return self.cache.directory
 
     @property
     def ntasks(self):
-        """The task count."""
+        """Task count."""
         return len(self._tasks)
 
     @property
@@ -54,8 +70,8 @@ class Pipeline:
     def add(self, *tasks: Task) -> None:
         """Add Tasks to the Pipeline."""
         for task in tasks:
-            self._tasks.append(task)
             task.pipeline = self
+            self._tasks.append(task)
         return
 
     def set_forced(self, *forced_tasks: str) -> None:
@@ -113,6 +129,7 @@ class Pipeline:
         Args:
             force (bool): Clears all previously cached results before execution
         """
+        _start = perf_counter_ns()
 
         # Validate all tasks have run methods
         self.validate_tasks()
@@ -123,14 +140,14 @@ class Pipeline:
             self.cache.evict("RESULTS")
 
         # Execute tasks in order
-        app_logger.log("APP", "Starting pipeline execution...")
+        app_logger.log("APP", f"Executing pipeline ('{self.name}')...")
 
         for task in self.tasks:
 
             # Handle ignored tasks
             if task.name in self.ignored_tasks and task.name not in self.forced_tasks:
-                app_logger.info(f"Ignoring: {task.name}")
-                task.skipped = True
+                app_logger.warning(f"IGNORE {task.name}")
+                task.is_skipped = True
                 continue
 
             # Try to use cached results
@@ -141,19 +158,20 @@ class Pipeline:
             cached_results = self.cache.get(task.name)
 
             if (cached_results is not None and has_same_inputs and has_same_script):
-                app_logger.info(f"Using previous data: {task.name}")
-                task.skipped = True
+                app_logger.warning(
+                    f"SKIP {task.name}: Using cached results ({type(task.result).__name__})"
+                )
+                task.is_skipped = True
                 continue
 
             # Execute task
-            app_logger.info(f"Executing: {task.name}")
             result = task.run()
 
             # Cache the results
             self.cache.set(
                 task.name,
                 result,
-                expire=task.expiry(),
+                expire=task.expire_results(),
                 tag="RESULTS"
             )
             # Cache hashes
@@ -166,7 +184,17 @@ class Pipeline:
                 tag="HASHES"
             )
 
-        app_logger.success("Pipeline complete!")
+        _time = util.time_diff(_start, perf_counter_ns())
+
+        # Processing Complete
+        app_logger.success(f"Pipeline complete! <light-black>(in {_time})</>")
+
+        # Clean up / Handle on-complete expirations
+        for key in expire._on_complete_deletions:
+            app_logger.info(f"<light-black>Expiring results for {key}</>")
+            self.cache.delete(key)
+
+        return
 
     def __repr__(self):
         return f"<Pipeline: {self.name} ({self.ntasks} tasks)>"

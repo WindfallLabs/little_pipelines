@@ -1,12 +1,11 @@
 """Cache"""
 
-import atexit
 from pathlib import Path
 from typing import Optional
 
 import diskcache
 
-#_ACTIVE_CACHE = None
+_ACTIVE_CACHE: Optional[diskcache.Cache] = None
 
 # class CacheName:
 #     """Allows for injecting custom cache filenames."""
@@ -27,14 +26,14 @@ import diskcache
 #         return False
 
 
-def get_cache(name: Optional[str] = None) -> diskcache.Cache:
+def get_cache(pipeline_name: str) -> diskcache.Cache:
     """Connects to the cache file (creates if needed)."""
-    cache_dir = Path().home() / ".little_pipelines"
-    if name:
-        cache_dir = cache_dir / name
+    cache_dir = Path().home() / ".little_pipelines" / pipeline_name
     if not cache_dir.exists():
         cache_dir.mkdir()
     cache = diskcache.Cache(str(cache_dir), tag_index=True)
+    global _ACTIVE_CACHE
+    _ACTIVE_CACHE = cache
     return cache
 
 
