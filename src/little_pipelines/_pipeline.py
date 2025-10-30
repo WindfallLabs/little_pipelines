@@ -53,7 +53,9 @@ class Pipeline:
 
     def add(self, *tasks: Task) -> None:
         """Add Tasks to the Pipeline."""
-        self._tasks.extend(tasks)
+        for task in tasks:
+            self._tasks.append(task)
+            task.pipeline = self
         return
 
     def set_forced(self, *forced_tasks: str) -> None:
@@ -124,7 +126,6 @@ class Pipeline:
         app_logger.log("APP", "Starting pipeline execution...")
 
         for task in self.tasks:
-            task.pipeline = self  # TODO: why again?
 
             # Handle ignored tasks
             if task.name in self.ignored_tasks and task.name not in self.forced_tasks:
