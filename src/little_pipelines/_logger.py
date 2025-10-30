@@ -37,7 +37,7 @@ def make_logger(name, filename, level="DEBUG", retention="30 days", rotation="1 
     bound_logger.add(
         filename,
         format=LOGURU_FORMAT,
-        colorize=True,
+        #colorize=True,
         filter=lambda record: record["extra"].get("logger_name") == name,
         rotation=rotation,
         retention=retention,
@@ -58,7 +58,8 @@ def make_app_logger(level="INFO"):
     _APP_LOGGER_ID = app_logger.add(
         sys.stderr,
         format=app_fmt,
-        level=level
+        level=level,
+        colorize=True
     )
     return app_logger
 

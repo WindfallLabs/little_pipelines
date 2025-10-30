@@ -3,15 +3,18 @@
 import datetime as dt
 from collections.abc import Callable
 from functools import wraps
+from pathlib import Path
 from time import perf_counter_ns
-from types import MappingProxyType
-from typing import Any, Literal, Optional, Self
+from typing import Any, Literal, Optional, Self, TYPE_CHECKING
 
 from loguru import _Logger
 
-from ._config import config
-from ._exceptions import TaskNotFoundError
+from . import expiry
+from ._hashing import hash_file, hash_files, hash_script
 from ._logger import make_logger
+
+if TYPE_CHECKING:
+    from ._pipeline import Pipeline  # BUG: doesn't work as expected
 
 
 def time_diff(start: float, end: float) -> str:
@@ -26,25 +29,6 @@ def time_diff(start: float, end: float) -> str:
 
 class Task:
     """Parent class for Tasks."""
-    registry: list[Self] = []
-    show_warnings = True
-
-    # ========================================================================
-    # Class methods & dunders
-
-    @classmethod
-    def get_task(cls, name: str):
-        try:
-            ds = [i for i in cls.registry if i.name == name][0]
-            return ds
-        except IndexError:
-            raise TaskNotFoundError(f"Task '{name}' not found in registry")
-
-    def __repr__(self):
-        return f"<{self.__class__.__name__}(name='{self._name}')>"
-
-    # ========================================================================
-    # Properties
 
     @property
     def name(self) -> str:
@@ -52,28 +36,53 @@ class Task:
         return self._name
 
     @property
-    def dependencies(self) -> list[Self]:
+    def is_executed(self) -> bool:
+        return self._executed
+
+    @property
+    def skipped(self):
+        return self._skipped
+
+    @skipped.setter
+    def skipped(self, value: bool):
+        if value is True:
+            self.log(f"Skipping execution of '{self.name}'", "WARNING")
+        self._skipped = value
+
+    # @property
+    # def disable_logging(self):
+    #     return self._disable_logging
+
+    # @disable_logging.setter
+    # def disable_logging(self, value: bool):
+    #     if value is True:
+    #         self.log(f"Logging disabled for '{self.name}'", "WARNING")
+    #     self._disable_logging = value
+
+    @property
+    def dependencies(self) -> dict[str, Self] | None:
         """Up-stream tasks this task depends on."""
-        return [
-            self.get_task(n) for n in self._dependency_names
-        ]
+        if self.pipeline is not None:
+            return {
+                name: self.pipeline.get_task(name) for name in self._dependency_names
+            }
+        return None
 
     @property
-    def dependents(self) -> list[Self]:
-        """Down-stream tasks that depend on this task."""
-        dependents = [
-            i[0] for i in [
-                (t, t._dependency_names) for t in Task.registry
-            ] if self.name in i[1]]
-        return dependents
+    def result(self) -> Any:
+        if self.pipeline is None:
+            return None
+        return self.pipeline.cache.get(self.name)
 
     @property
-    def datastore(self) -> dict[str, Any]:
-        return MappingProxyType(self._datastore)
-    
+    def _script_hash(self):
+        return hash_script(self)
+
     @property
-    def has_data(self) -> bool:
-        return len(self.datastore.keys()) > 0
+    def _inputs_hash(self):
+        if self.input_files:
+            return hash_files(self)
+        return ""
 
     # ========================================================================
     # Instance methods
@@ -82,39 +91,51 @@ class Task:
             self: Self,
             name: str,
             dependencies: Optional[list[str]] = None,
-            execution_type: Literal["AUTO", "MANUAL"] = "AUTO"
+            expires: Optional[Callable] = None,
+            input_files: Optional[list[Path | str]] = None,
+            hash_inputs: bool = True,
+            log_path: Optional[Path|Literal["DISABLE"]] = None
         ):
+        """
+        Initialize a Task.
+
+        Args:
+            name: Unique task name
+            dependencies: List of task names this task depends on
+            execution_type: "AUTO" or "MANUAL" execution
+            use_cache: If True, task results will be cached for resume
+            input_files: List of input file paths/patterns for hash tracking
+            hash_inputs: If False, use empty string hash (for API/DB inputs)
+        """
         self._name: str = name
         self._dependency_names: list[str] = dependencies if dependencies else list()
-        if execution_type.upper() not in ("AUTO", "MANUAL"):
-            raise AttributeError("'execution_type' must either be 'AUTO' or 'MANUAL'")
-        self._execution_type = execution_type.upper()
-        self._process_times = []
-        # A place to store data for the lifecycle of the object
-        self._datastore: dict[str, Any] = {}
-        self._executed = False
-
-        # Logging setup
-        self.logger: _Logger = make_logger(
-            self.name,
-            filename=config.log_dir
+        self.expiry = expires or expiry.session(name)
+        self._log_path = (
+            log_path
+            or Path().home() / ".little_pipelines" / "logs" / f"{self.name}.log"
         )
 
-        # Add the instance to the registry
-        self.registry.append(self)
+        self._process_times = []
+        self._executed = False
+        self._skipped = False
 
-    def store(self, key: str, value: Any) -> None:
-        """Add a key-value pair to the data store."""
-        self._datastore.update({key: value})
-        return
-    
-    def flush(self):
-        """Flush the data store."""
-        self._datastore.clear()
-        return
+        # Pipeline cache configuration
+        self.input_files = input_files  # TODO: ??
+        self.hash_inputs = hash_inputs  # TODO: ??
+
+        self.pipeline: Optional["Pipeline"] = None
+
+        # Logging setup
+        self._disable_logging = False
+        self.logger = None
+        if self._log_path != "DISABLE":
+            self.logger: _Logger = make_logger(
+                self.name,
+                filename=self._log_path
+            )
 
     def log(self, msg, level="INFO"):
-        if not self.logger:
+        if self.logger is None: # or self.disable_logging:
             return
         self.logger.opt(colors=True).log(level, msg)
         return
@@ -142,8 +163,16 @@ class Task:
                 f"{self.name}:{func_name} (in {_time})",
                 "PERF"
             )
+            if func_name == "run":
+                self._executed = True
             return result
 
         # Register the custom process with the Task
         setattr(self, func.__name__, _wrapper)
         return
+
+    # ========================================================================
+    # Dunders
+
+    def __repr__(self):
+        return f"<Task ('{self._name}')>"

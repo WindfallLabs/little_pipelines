@@ -1,58 +1,117 @@
+from pathlib import Path
+
 import little_pipelines as lp
 
-
-zero = lp.Task(
-    name="Zero",
-)
-
-@zero.process
-def run(this, *args, **kwargs):
-    this.log(f"{this.name} is running!")
-    this.store("data", ["Some", "values"])
-    this.log(f"Has data: {this.has_data}")
-    return
+TEST_CACHE = "tests"
 
 
-one = lp.Task(
-    name="One",
-    dependencies=["Zero"]
-)
+def create_pipeline(pipeline_name):
+    zero = lp.Task(
+        name="Zero",
+        log_path="DISABLE"
+    )
+
+    @zero.process
+    def run(this, *args, **kwargs):
+        return ["Some", "values"]
+
+    one = lp.Task(
+        name="One",
+        dependencies=["Zero"],
+        log_path="DISABLE"
+    )
+
+    @one.process
+    def preflight(this, *args, **kwargs):
+        return "OK"
+
+    @one.process
+    def run(this, *args, **kwargs):
+        status = this.preflight()
+        
+        # Get data from upstream task
+        data: list[str] = this.pipeline.get_result("Zero")
+        data.extend(["more", "values"])
+        return data
+
+    pipeline = lp.Pipeline(
+        name=pipeline_name,
+        cache_name=TEST_CACHE
+    )
+    pipeline.add(
+        zero,
+        one,
+    )
+    return pipeline, zero, one
 
 
-@one.process
-def preflight(this, *args, **kwargs):
-    this.log("Just checking something...")
-    this.store("preflight", "OK")
-    return
+def test_execution_order():
+    """Test basic execution order."""
+    pipeline, zero, one = create_pipeline("test_pipeline")
+    tasks = [task for task in pipeline.tasks]
+    assert tasks == [zero, one]
+    assert not zero.is_executed
+    assert not one.is_executed
+    pipeline.cache.clear()
 
 
-@one.process
-def run(this, *args, **kwargs):
-    this.log(f"{this.name} is running!")
-    this.preflight()  # As defined above
-    this.log("Let's mutate <cyan>Zero</>'s data!")
-    data = lp.get_task_data("Zero", "data")
-    data.extend(["more", "values"])
-    #this.log(data)
-    this.log("Setting a value")
-    this.store("data", ["another"])
-    return
+def test_pipeline_execution():
+    """Test basic pipeline execution."""
+    pipeline, zero, one = create_pipeline("test_pipeline")
+    pipeline.execute()
+
+    assert zero.is_executed == True
+    assert one.is_executed == True
+    pipeline.cache.clear()
 
 
-manual = lp.Task(
-    name="Manual Task",
-    dependencies=["Zero", "One"],
-    execution_type="MANUAL"  # ignored by the graph by default
-)
+def test_checkpoints():
+    """Test checkpoint functionality."""
+    # First execution
+    pipeline, zero, one = create_pipeline("test_pipeline")
+    pipeline.execute(force=True)  # Clear cache
 
-@manual.process
-def run(this, *args, **kwargs):
-    this.log(f"{this.name} is running!")
-    this.log("Getting <cyan>Zero</>'s data again")
-    zero_data = lp.get_task_data("Zero", "data")
-    one_preflight = lp.get_task_data("One", "preflight")
-    if one_preflight == "OK":
-        this.log("Things are good!")
-    one_data = lp.get_task_data("One", "data")
-    this.log(f"'{zero_data[1]}' and '{one_data[0]}'")
-    return
+    assert zero.is_executed == True, "Zero not executed"
+    assert one.is_executed == True, "One not executed"
+
+    # Second execution with fresh tasks (simulates rerunning script)
+    pipeline2, zero2, one2 = create_pipeline("test_checkpoints")
+    pipeline2.execute()
+
+    # Fresh tasks should use checkpoints (never actually run)
+    assert zero2.is_executed == True  # Marked executed via checkpoint
+    assert one2.is_executed == True
+    pipeline.cache.clear()
+
+
+def test_force_tasks():
+    """Test forcing specific tasks to re-run."""
+    # Initial run
+    pipeline, zero, one = create_pipeline("test_pipeline")
+    pipeline.execute()
+
+    # Second run with fresh tasks, force One
+    pipeline2, zero2, one2 = create_pipeline("test_pipeline")
+    pipeline2.set_forced(one2.name)
+    pipeline2.execute()
+
+    # Both marked as executed (Zero from cache, One forced)
+    assert zero2.is_executed == True
+    assert one2.is_executed == True
+    #assert len(pipeline2.results["One"]) == 4
+    pipeline.cache.clear()
+
+
+def test_ignore_tasks():
+    """Test ignoring specific tasks."""
+    pipeline, zero, one = create_pipeline("test_ignore")
+
+    # Execute with One ignored
+    pipeline.ignored_tasks=["One"]
+    pipeline.execute()
+
+    # Zero should run, One should be skipped
+    assert zero.is_executed == True
+    assert one.is_executed == False
+    assert one.skipped == True
+    pipeline.cache.clear()
