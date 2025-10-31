@@ -64,6 +64,18 @@ class Task:
             )
         return
 
+    def execute_with(self, pipeline_name: str, force=False):
+        """EXPERIMENTAL - Allows for ad-hoc single task execution."""
+        from little_pipelines import Pipeline
+        pipeline = Pipeline(
+            pipeline_name,
+        )
+        pipeline.add(self)
+        self.logger.warning("Calling experimental function 'execute_with'")
+        pipeline.execute()
+        return
+
+
     # ========================================================================
     # Properties
 

@@ -5,9 +5,16 @@ import pytest
 
 import little_pipelines as lp
 
+# ============================================================================
+# CONFIG
+
 PIPELINE_NAME = ".little-pipelines-tests"
-REMOVE_TEST_DIRECTORY = True
-DO_LOGGING = False
+REMOVE_TEST_DIRECTORY = False
+
+
+# ============================================================================
+
+DO_LOGGING = not REMOVE_TEST_DIRECTORY
 
 
 def rm_dir(cache):
@@ -145,3 +152,17 @@ def test_ignore_tasks(create_pipeline):
     assert one.is_skipped == True
     pipeline.clear_ignored()
     assert len(pipeline.ignored_tasks) == 0
+
+
+def test_solo():
+    task1 = lp.Task("Solo")
+    task1._enable_logging = DO_LOGGING
+
+    @task1.process
+    def run(this):
+        return 1
+
+    task1.execute_with(PIPELINE_NAME)
+
+    assert task1.result == 1
+    rm_dir(task1.pipeline.cache)

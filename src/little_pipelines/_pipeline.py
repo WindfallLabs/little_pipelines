@@ -3,13 +3,15 @@
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
-from typing import Any, Callable, Optional, Generator
+from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import util
 from . import expire
 from ._cache import get_cache
 from ._logger import app_logger
-from ._tasks import Task
+
+if TYPE_CHECKING:
+    from ._tasks import Task
 
 
 class Pipeline:
@@ -30,7 +32,7 @@ class Pipeline:
         """
         self.name = name
         self.cache = get_cache(name)
-        self._tasks: list[Task] = []
+        self._tasks: list["Task"] = []
         self.ignored_tasks: list[str] = []
         self.forced_tasks: list[str] = []
 
@@ -58,7 +60,7 @@ class Pipeline:
         return len(self._tasks)
 
     @property
-    def tasks(self) -> Generator[Task]:
+    def tasks(self) -> Generator["Task"]:
         """Generates the execution order of tasks based on dependencies."""
         deps: dict[str, list[str]] = {
             dep.name: dep._dependency_names for dep in self._tasks
@@ -67,7 +69,7 @@ class Pipeline:
             task = self.get_task(cls_name)
             yield task
 
-    def add(self, *tasks: Task) -> None:
+    def add(self, *tasks: "Task") -> None:
         """Add Tasks to the Pipeline."""
         for task in tasks:
             task.pipeline = self
@@ -96,7 +98,7 @@ class Pipeline:
 
     def get_task(self, task_name: str):
         """Gets a task by name."""
-        task_lookup: dict[str, Task] = {task.name: task for task in self._tasks}
+        task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
         return task_lookup[task_name]  # We want this to error if need be
 
     def get_result(self, task_name: str):
