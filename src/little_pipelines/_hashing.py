@@ -2,6 +2,7 @@
 
 import hashlib
 import inspect
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,7 +10,7 @@ if TYPE_CHECKING:
     from ._tasks import Task
 
 
-def hash_file(filepath: Path) -> str:
+def hash_file(filepath: Path|BytesIO) -> str:
     """
     Hash a single file's contents.
 
@@ -22,10 +23,15 @@ def hash_file(filepath: Path) -> str:
     hasher = hashlib.sha256()
 
     try:
-        with open(filepath, 'rb') as f:
-            # Read in chunks for memory efficiency with large files
-            for chunk in iter(lambda: f.read(65536), b''):
-                hasher.update(chunk)
+        if hasattr(filepath, "read"):
+            f = filepath
+        else:
+            f = open(filepath, 'rb')
+
+        # Read in chunks for memory efficiency with large files
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+
         return hasher.hexdigest()
     except (OSError, IOError) as e:
         # File doesn't exist or can't be read
@@ -42,7 +48,7 @@ def hash_files(*files: Path):
     return hashlib.sha256(s.encode("UTF8")).hexdigest()
 
 
-def hash_script(task: "Task") -> str:
+def hash_script(filepath: Path) -> str:
     """
     Hash the entire module file where the task is defined.
 
@@ -52,18 +58,8 @@ def hash_script(task: "Task") -> str:
     Returns:
         SHA256 hash of the task's module file
     """
+
     try:
-        # Get the module where the task's run method is defined
-        module = inspect.getmodule(task.__class__)
-
-        if not module or not hasattr(module, '__file__'):
-            return "NOSCRIPT"
-
-        module_file = Path(module.__file__)
-        if not module_file.exists():
-            return "NOSCRIPTERROR"
-
-        return hash_file(module_file)
-
+        return #hash_file(module_file)
     except (OSError, TypeError, AttributeError):
         return "HASHERROR"

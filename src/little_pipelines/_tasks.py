@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from functools import wraps
+from inspect import currentframe
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Any, Optional, Self, TYPE_CHECKING
@@ -10,7 +11,7 @@ from loguru import _Logger
 
 from . import expire
 from . import util
-from ._hashing import hash_file, hash_files, hash_script
+from ._hashing import hash_file, hash_files
 from ._logger import make_logger
 
 if TYPE_CHECKING:
@@ -139,14 +140,21 @@ class Task:
         return self.pipeline.cache.get(self.name)
 
     @property
+    def _script_path(self):
+        # Get the filename from the parent frame
+        return Path(currentframe().f_back.f_globals['__file__'])
+
+    @property
     def _script_hash(self):
-        return hash_script(self)
+        return hash_file(self._script_path)
 
     @property
     def _inputs_hash(self):
-        if self.input_files:
-            return hash_files(self)
-        return ""
+        h = ""
+        if self.input_files and self.hash_inputs:
+            for inp in self.input_files:
+                h = hash_files(inp)
+        return h
 
     # ========================================================================
     # Decorators

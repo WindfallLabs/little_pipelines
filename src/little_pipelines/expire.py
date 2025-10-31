@@ -6,16 +6,10 @@ import datetime as dt
 from typing import Callable
 
 from ._cache import _ACTIVE_CACHE
-from ._logger import app_logger
-
+#from ._logger import app_logger
 
 
 _on_complete_deletions: list[str] = []
-
-# _callbacks: dict[str, list[str]] = {
-#     "on_complete": [],
-#     "on_fail": []
-# }
 
 
 def _add_months(date: dt.date|dt.datetime, months) -> dt.datetime:
@@ -55,7 +49,7 @@ def at_midnight() -> Callable:
         now = dt.datetime.now()
         tomorrow = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         seconds_until = int((tomorrow - now).total_seconds())
-        app_logger.log("{name} " + f"Expiry (seconds): {seconds_until}", "DEBUG")
+        #app_logger.debug(f"Expiry (seconds): {seconds_until}")
         return seconds_until
     return expire_at_midnight
 
@@ -67,9 +61,11 @@ def from_now(years=0, months=0, weeks=0, days=0, hours=0, minutes=0, seconds=0) 
         delta = dt.timedelta(weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds)
         now = dt.datetime.now()
         new_year = now.year + years
-        future_date = _add_months(now, months).replace(year=new_year, microsecond=0) + delta
+        future_date = now.replace(year=new_year) + delta
+        if months:
+            future_date = _add_months(future_date, months)
         seconds_until = int((future_date - now).total_seconds())
-        app_logger.log("{name} " + f"Expiry (seconds): {seconds_until}", "DEBUG")
+        #app_logger.debug(f"Expiry (seconds): {seconds_until}")
         return seconds_until
     return expire_from_now
 
@@ -82,9 +78,11 @@ def from_today(years=0, months=0, weeks=0, days=0, hours=0, minutes=0, seconds=0
         # Get today (as datetime)
         today = dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         new_year = today.year + years
-        future_date = _add_months(today, months).replace(year=new_year, microsecond=0) + delta
+        future_date = today.replace(year=new_year) + delta
+        if months:
+            future_date = _add_months(future_date, months)
         seconds_until = int((future_date - today).total_seconds())
-        app_logger.log("{name} " + f"Expiry (seconds): {seconds_until}", "DEBUG")
+        #app_logger.debug(f"Expiry (seconds): {seconds_until}")
         return seconds_until
     return expire_from_today
 
@@ -103,7 +101,7 @@ def at_datetime(future_date: dt.date|dt.datetime) -> Callable:
     def expire_at_datetime() -> int:
         now = dt.datetime.now()
         seconds_until = int((future_date - now).total_seconds())
-        app_logger.log("{name} " + f"Expiry (seconds): {seconds_until}", "DEBUG")
+        #app_logger.debug(f"Expiry (seconds): {seconds_until}")
         return seconds_until
 
     return expire_at_datetime
