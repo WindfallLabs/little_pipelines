@@ -20,7 +20,7 @@ class TestTaskBasics:
         assert task.is_skipped == False
         assert task.logger is None
         assert task.pipeline is None
-        assert task._script_path == Path(__file__)
+        assert task._script_path == __file__
     
     def test_task_with_dependencies(self):
         """Test Task initialization with dependencies."""

@@ -6,11 +6,6 @@ from typing import Literal, Optional
 from rich.console import Console
 
 from ._logger import app_logger, reset_app_logger
-# from ._execution import (
-#     execute_task,
-#     execution_order,
-#     validate_tasks
-# )
 
 
 def make_heading(title: str, offset=0, char="#"):

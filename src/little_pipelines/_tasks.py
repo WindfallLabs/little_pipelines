@@ -5,6 +5,7 @@ from functools import wraps
 from inspect import currentframe
 from pathlib import Path
 from time import perf_counter_ns
+from types import ModuleType
 from typing import Any, Optional, Self, TYPE_CHECKING
 
 from loguru import _Logger
@@ -16,6 +17,25 @@ from ._logger import make_logger
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline  # BUG: doesn't work as expected
+
+
+def find_tasks(vars, nested=True):
+    """Finds tasks - useful to `add` all Tasks to a Pipeline."""
+    found_instances = set()
+
+    for name, obj in vars.items():
+        if isinstance(obj, Task):
+            found_instances.add(obj)
+        elif isinstance(obj, ModuleType) and nested:
+            for attr_name in dir(obj):
+                try:
+                    attr = getattr(obj, attr_name)
+                    if isinstance(attr, Task):
+                        found_instances.add(attr)
+                except (AttributeError, Exception):
+                    continue
+    
+    return found_instances
 
 
 class Task:
@@ -48,6 +68,7 @@ class Task:
         self._skipped = False
 
         # Pipeline cache configuration
+        self._script_path = currentframe().f_back.f_globals.get('__file__')
         self.input_files = input_files  # TODO: ??
         self.hash_inputs = hash_inputs  # TODO: ??
 
@@ -139,10 +160,12 @@ class Task:
             return None
         return self.pipeline.cache.get(self.name)
 
-    @property
-    def _script_path(self):
-        # Get the filename from the parent frame
-        return Path(currentframe().f_back.f_globals['__file__'])
+    # @property
+    # def _script_path(self):
+    #     # Get the filename from the parent frame
+    #     p = Path(currentframe().f_back.f_globals['__file__'])
+    #     print(p)  # BUG: DEBUG
+    #     return p
 
     @property
     def _script_hash(self):

@@ -4,4 +4,4 @@ from ._exceptions import TaskNotFoundError
 from ._logger import reset_app_logger
 from ._pipeline import Pipeline
 from ._shell import Shell
-from ._tasks import Task
+from ._tasks import Task, find_tasks

@@ -54,14 +54,21 @@ def clean_pipeline():
 @pytest.fixture
 def sample_tasks():
     """Create sample tasks for testing (as in README example)."""
-    zero = lp.Task(name="Zero")
+    zero = lp.Task(
+        name="Zero",
+        expire_results=lp.expire.never()
+    )
     zero._enable_logging = DO_LOGGING
 
     @zero.process
     def run(this):
         return ["Some", "values"]
 
-    one = lp.Task(name="One", dependencies=["Zero"])
+    one = lp.Task(
+        name="One",
+        dependencies=["Zero"],
+        expire_results=lp.expire.never()
+    )
     one._enable_logging = DO_LOGGING
 
     @one.process

@@ -21,16 +21,19 @@ class Pipeline:
 
     def __init__(
         self,
-        name: str = "default",
+        name: str,
+        expire_results_if_none: bool = True,
     ):
         """
         Initialize a pipeline.
 
         Args:
-            name: Pipeline name (names the cache's parent folder)
-            cache_dir: Custom cache directory (default: %USER%/.little_pipelines/{name})
+            name (str): Pipeline name (names the cache's parent folder)
+            expire_results_if_none (bool): Delete None results on pipeline complete
         """
         self.name = name
+        self.expire_results_if_none = expire_results_if_none
+
         self.cache = get_cache(name)
         self._tasks: list["Task"] = []
         self.ignored_tasks: list[str] = []
@@ -156,6 +159,7 @@ class Pipeline:
             cached_hashes = self.cache.get(task.name + "_hashes", default=dict())
             has_same_script = (cached_hashes.get("script") == task._script_hash)
             has_same_inputs = (cached_hashes.get("inputs") == task._inputs_hash)
+            app_logger.debug(f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}")
             # Will be None if force=True
             cached_results = self.cache.get(task.name)
 
@@ -191,10 +195,15 @@ class Pipeline:
         # Processing Complete
         app_logger.success(f"Pipeline complete! <light-black>(in {_time})</>")
 
-        # Clean up / Handle on-complete expirations
+        # Clean up - Handle on-complete expirations
         for key in expire._on_complete_deletions:
             app_logger.info(f"<light-black>Expiring results for {key}</>")
             self.cache.delete(key)
+        # Clean up - Delete None results
+        if self.expire_results_if_none:
+            for key in self.cache.iterkeys():
+                if self.cache[key] is None:
+                    self.cache.delete(key)
 
         return
 
