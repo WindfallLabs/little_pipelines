@@ -43,9 +43,9 @@ def clean_pipeline():
     """Create a clean pipeline with automatic cleanup."""
     pipeline = lp.Pipeline(PIPELINE_NAME)
     pipeline.cache.clear()
-    
+
     yield pipeline
-    
+
     pipeline.cache.clear()
     if REMOVE_TEST_DIRECTORY:
         atexit.register(lambda: rm_dir(pipeline.cache))

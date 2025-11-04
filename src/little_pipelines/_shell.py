@@ -1,11 +1,14 @@
 """Shell"""
 import os
 from cmd import Cmd
-from typing import Literal, Optional
+from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
 
 from ._logger import app_logger, reset_app_logger
+
+if TYPE_CHECKING:
+    from ._pipeline import Pipeline
 
 
 def make_heading(title: str, offset=0, char="#"):
@@ -18,6 +21,16 @@ class Shell(Cmd):
     prompt = "> "
     title = "\nLittle-Pipelines Shell"
     console = Console()
+    powered_by = True
+    pipeline: Optional["Pipeline"] = None
+
+    # ========================================================================
+    # Setup
+
+    def set_pipeline(self, pipeline: "Pipeline"):
+        """Set the pipeline. Call this before `cmdloop`."""
+        self.pipeline = pipeline
+        return self
 
     # ========================================================================
     # Exit and aliases
@@ -46,7 +59,8 @@ class Shell(Cmd):
         elif str(line).strip(" ") == "":
             return stop
         else:
-            app_logger.success("Done.")
+            # Use 'End' as it doesn't indicate successful execution
+            app_logger.success("<light-black>End.</>")
         return stop
 
     def preloop(self):
@@ -55,7 +69,9 @@ class Shell(Cmd):
         self.console.rule(f"[bright_black]{self.title}[/]", style="yellow on black")
         if hasattr(self, "header"):
             self.console.print(self.header)
-        self.console.print("[bright_black]powered by Little-Pipelines[/]")
+        if self.powered_by:
+            self.console.print("[bright_black]powered by Little-Pipelines[/]")
+        self.console.print(f"Loaded pipeline: [bright_blue]{self.pipeline.name}[/]")
         self.console.print("[green]Ready.[/]")
         return
 
@@ -63,7 +79,7 @@ class Shell(Cmd):
         app_logger.log("APP", "Shell closed")
         self.console.rule(style="yellow")
         return
-    
+
     def precmd(self, line):
          return line
 
@@ -92,12 +108,14 @@ class Shell(Cmd):
         """Lists all registered tasks (in topological order)."""
         app_logger.log("APP", "Listing registered tasks...")
         self.console.print("Registered Tasks:")
-        for task in execution_order(False):
+        for task in self.pipeline.tasks(False):
             self.console.print(f"- {task.name}")
         return
 
-    #def peek(self, inp):
-    #    ...
+    def do_peek(self, inp):
+        """Preview cached data."""
+        print(self.pipeline.get_result(inp))
+        return
 
     # ========================================================================
     # Execution
@@ -105,41 +123,33 @@ class Shell(Cmd):
     @app_logger.catch
     def do_execute(self, inp):
         """Executes a task by name, or use '.' for all tasks."""
-        if not inp or inp == ".":
-            app_logger.log("APP", "Executing all tasks...")
+        inputs = inp.split()
+        task_name = inputs[0]
+        force = ("--force" in inputs)
+        if task_name == ".":
+            self.pipeline.execute(force=force)
 
-            for task in execution_order():
-                self.console.rule(task.name, style="cyan")
-                task.run()
-
+        # Execute a single task -- assume the user knows the risks.
         else:
-            self.console.rule(inp, style="cyan")
-            app_logger.log("APP", f"===== Executing {inp} =====")
-            execute_task(inp)
+            task = self.pipeline.get_task(task_name)
+            app_logger.warning(f"Executing single task: {task_name}")
+            result = task.run()
+            self.pipeline._cache_result(task, result)
         return
-    
+
     @app_logger.catch
     def do_validate(self, inp):
         """Validates tasks."""
         app_logger.log("APP", "Validating...")
-        validate_tasks()
+        self.pipeline.validate_tasks()
         return
 
     @app_logger.catch
-    def do_flush(self, inp):
-        """Flush all data from Task objects."""
-        app_logger.log("APP", "Flushing Task data...")
-        ...  # TODO:
+    def do_clear(self, inp):
+        """Clear all data from cache."""
+        app_logger.log("APP", "Clearing cached data...")
+        self.pipeline.cache.clear()
+        return
 
 
 __all__ = ["Shell"]
-
-
-def main() -> None:
-    """Main shell loop."""
-    Shell().cmdloop()
-    return
-
-
-if __name__ == "__main__":
-    main()

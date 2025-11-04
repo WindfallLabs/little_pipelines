@@ -124,6 +124,26 @@ class Pipeline:
             )
         return
 
+    def _cache_result(self, task: "Task", result: Any):
+        """Caches task info and results."""
+        # Cache the results
+        self.cache.set(
+            task.name,
+            result,
+            expire=task.expire_results(),
+            tag="RESULTS"
+        )
+        # Cache hashes
+        self.cache.set(
+            task.name + "_hashes",
+            {
+                "script": task._script_hash,
+                "inputs": task._inputs_hash,
+            },
+            tag="HASHES"
+        )
+        return
+
     def execute(
         self,
         force = False,
@@ -172,23 +192,7 @@ class Pipeline:
 
             # Execute task
             result = task.run()
-
-            # Cache the results
-            self.cache.set(
-                task.name,
-                result,
-                expire=task.expire_results(),
-                tag="RESULTS"
-            )
-            # Cache hashes
-            self.cache.set(
-                task.name + "_hashes",
-                {
-                    "script": task._script_hash,
-                    "inputs": task._inputs_hash,
-                },
-                tag="HASHES"
-            )
+            self._cache_result(task, result)
 
         _time = util.time_diff(_start, perf_counter_ns())
 

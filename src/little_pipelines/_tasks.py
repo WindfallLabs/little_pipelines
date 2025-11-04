@@ -34,7 +34,7 @@ def find_tasks(vars, nested=True):
                         found_instances.add(attr)
                 except (AttributeError, Exception):
                     continue
-    
+
     return found_instances
 
 
@@ -63,6 +63,7 @@ class Task:
         self._dependency_names: list[str] = dependencies if dependencies else list()
         self.expire_results = expire_results or expire.after_session(name)
 
+        #self._results: Any = None
         self._process_times = []
         self._executed = False
         self._skipped = False
@@ -86,17 +87,16 @@ class Task:
             )
         return
 
-    def execute_with(self, pipeline_name: str, force=False):
-        """EXPERIMENTAL - Allows for ad-hoc single task execution."""
-        from little_pipelines import Pipeline
-        pipeline = Pipeline(
-            pipeline_name,
-        )
-        pipeline.add(self)
-        self.logger.warning("Calling experimental function 'execute_with'")
-        pipeline.execute()
-        return
-
+    # def execute_with(self, pipeline_name: str, force=False):
+    #     """EXPERIMENTAL - Allows for ad-hoc single task execution."""
+    #     from little_pipelines import Pipeline
+    #     pipeline = Pipeline(
+    #         pipeline_name,
+    #     )
+    #     pipeline.add(self)
+    #     self.logger.warning("Calling experimental function 'execute_with'")
+    #     pipeline.execute()
+    #     return
 
     # ========================================================================
     # Properties
@@ -159,13 +159,6 @@ class Task:
         if self.pipeline is None:
             return None
         return self.pipeline.cache.get(self.name)
-
-    # @property
-    # def _script_path(self):
-    #     # Get the filename from the parent frame
-    #     p = Path(currentframe().f_back.f_globals['__file__'])
-    #     print(p)  # BUG: DEBUG
-    #     return p
 
     @property
     def _script_hash(self):
