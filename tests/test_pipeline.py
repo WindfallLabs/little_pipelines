@@ -310,7 +310,7 @@ class TestPipelineValidation:
 
         pipeline.add(task)
 
-        with pytest.raises(AttributeError, match="missing 'run' method"):
+        with pytest.raises(AttributeError, match="missing 'run' process"):
             pipeline.validate_tasks()
 
     def test_validate_tasks_passes(self, pipeline_with_tasks):

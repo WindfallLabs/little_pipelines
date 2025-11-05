@@ -183,10 +183,10 @@ class Task:
 
             # Pre-`run` stuff
             if func_name == "run":
-                self.logger.info(f"Running {self.name}...")
+                self.logger.info(f"{self.name} : Running...")
                 self.logger.debug(f"Expiry: {self.expire_results.__name__}")
             else:
-                self.logger.debug(f"<light-black>Running {self.name}:{func_name}</>")
+                self.logger.debug(f"<light-black>{self.name} : Running {func_name}</>")
 
             # Start the process timer
             _start = perf_counter_ns()  # TODO: this should be a context `with PerfCounter:`

@@ -243,7 +243,7 @@ class TestTaskExecution:
 
         pipeline.add(task)
 
-        with pytest.raises(AttributeError, match="missing 'run' method"):
+        with pytest.raises(AttributeError, match="missing 'run' process"):
             pipeline.execute()
 
 

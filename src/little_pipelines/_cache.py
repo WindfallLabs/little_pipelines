@@ -7,24 +7,6 @@ import diskcache
 
 _ACTIVE_CACHE: Optional[diskcache.Cache] = None
 
-# class CacheName:
-#     """Allows for injecting custom cache filenames."""
-#     def __init__(self, cache_name: str):
-#         self.original: str = diskcache.core.DBNAME
-#         self.new = cache_name
-
-#     def __enter__(self):
-#         """Called when entering the context"""
-#         diskcache.core.DBNAME = self.new
-#         return self
-
-#     def __exit__(self, exc_type, exc_value, traceback):
-#         """Called when exiting the context"""
-#         diskcache.core.DBNAME = self.original
-        
-#         # Return False to propagate exceptions, True to suppress them
-#         return False
-
 
 def get_cache(pipeline_name: str) -> diskcache.Cache:
     """Connects to the cache file (creates if needed)."""

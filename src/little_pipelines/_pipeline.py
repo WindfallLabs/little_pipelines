@@ -1,5 +1,6 @@
 """Pipeline execution with checkpointing."""
 
+from functools import cached_property
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
@@ -62,6 +63,11 @@ class Pipeline:
         """Task count."""
         return len(self._tasks)
 
+    @cached_property
+    def _max_task_name_len(self):
+        """Names of all tasks."""
+        return 1 + max([len(t.name) for t in self.tasks])
+
     @property
     def tasks(self) -> Generator["Task"]:
         """Generates the execution order of tasks based on dependencies."""
@@ -120,7 +126,7 @@ class Pipeline:
 
         if run_errors:
             raise AttributeError(
-                f"Tasks missing 'run' method: {', '.join(run_errors)}"
+                f"Tasks missing 'run' process: {', '.join(run_errors)}"
             )
         return
 
@@ -165,7 +171,7 @@ class Pipeline:
             self.cache.evict("RESULTS")
 
         # Execute tasks in order
-        app_logger.log("APP", f"Executing pipeline ('{self.name}')...")
+        app_logger.log("APP", f"Executing pipeline '{self.name}'...")
 
         for task in self.tasks:
 
@@ -185,7 +191,7 @@ class Pipeline:
 
             if (cached_results is not None and has_same_inputs and has_same_script):
                 app_logger.warning(
-                    f"SKIP {task.name}: Using cached results ({type(task.result).__name__})"
+                    f"{task.name.ljust(self._max_task_name_len)}: SKIP : Using cached results ({type(task.result).__name__})"
                 )
                 task.is_skipped = True
                 continue

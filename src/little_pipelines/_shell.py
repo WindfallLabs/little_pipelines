@@ -147,8 +147,12 @@ class Shell(Cmd):
     @app_logger.catch
     def do_clear(self, inp):
         """Clear all data from cache."""
-        app_logger.log("APP", "Clearing cached data...")
-        self.pipeline.cache.clear()
+        if not inp or inp == ".":
+            app_logger.log("APP", "Clearing all cached data...")
+            self.pipeline.cache.clear()
+        else:
+            app_logger.log("APP", f"Clearing cached data for {inp}...")
+            self.pipeline.cache.delete(inp)
         return
 
 
