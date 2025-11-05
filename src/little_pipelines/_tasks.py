@@ -63,13 +63,18 @@ class Task:
         self._dependency_names: list[str] = dependencies if dependencies else list()
         self.expire_results = expire_results or expire.after_session(name)
 
-        #self._results: Any = None
         self._process_times = []
         self._executed = False
         self._skipped = False
 
-        # Pipeline cache configuration
-        self._script_path = currentframe().f_back.f_globals.get('__file__')
+        # Inspection
+        _g = currentframe().f_back.f_globals
+        # Get the docstring for the instance's script
+        self.info = _g.get('__doc__')
+        # Get the filepath of the instance's script
+        self._script_path = _g.get('__file__')
+
+        # Hashing
         self.input_files = input_files  # TODO: ??
         self.hash_inputs = hash_inputs  # TODO: ??
 
@@ -86,17 +91,6 @@ class Task:
                 filename=self.log_dir if self._enable_logging else None,
             )
         return
-
-    # def execute_with(self, pipeline_name: str, force=False):
-    #     """EXPERIMENTAL - Allows for ad-hoc single task execution."""
-    #     from little_pipelines import Pipeline
-    #     pipeline = Pipeline(
-    #         pipeline_name,
-    #     )
-    #     pipeline.add(self)
-    #     self.logger.warning("Calling experimental function 'execute_with'")
-    #     pipeline.execute()
-    #     return
 
     # ========================================================================
     # Properties
@@ -116,8 +110,6 @@ class Task:
 
     @is_skipped.setter
     def is_skipped(self, value: bool):
-        #if value is True:
-        #    self.log(f"Skipping execution of '{self.name}'", "WARNING")
         self._skipped = value
 
     @property

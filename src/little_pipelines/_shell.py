@@ -123,6 +123,12 @@ class Shell(Cmd):
         """Preview cached data."""
         print(self.pipeline.get_result(inp))
         return
+    
+    def do_info(self, task_name):
+        """Print the docstring of the given Task."""
+        task_name = task_name.strip()
+        self.console.print(self.pipeline.get_task(task_name).__doc__)
+        return
 
     # ========================================================================
     # Inspection - Cache utils
