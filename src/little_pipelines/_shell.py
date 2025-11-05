@@ -23,6 +23,7 @@ class Shell(Cmd):
     console = Console()
     powered_by = True
     pipeline: Optional["Pipeline"] = None
+    logger = app_logger
 
     # ========================================================================
     # Setup
@@ -60,11 +61,11 @@ class Shell(Cmd):
             return stop
         else:
             # Use 'End' as it doesn't indicate successful execution
-            app_logger.success("<light-black>End.</>")
+            self.logger.success("<light-black>End.</>")
         return stop
 
     def preloop(self):
-        app_logger.log("APP", "Shell opened")
+        self.logger.log("APP", "Shell opened")
         self.console.print()
         self.console.rule(f"[bright_black]{self.title}[/]", style="yellow on black")
         if hasattr(self, "header"):
@@ -76,7 +77,7 @@ class Shell(Cmd):
         return
 
     def postloop(self):
-        app_logger.log("APP", "Shell closed")
+        self.logger.log("APP", "Shell closed")
         self.console.rule(style="yellow")
         return
 
@@ -86,13 +87,14 @@ class Shell(Cmd):
     # ========================================================================
     # Config
 
-    def do_log(self, inp: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
+    def do_log(self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
         """Sets the log level.
         Use:
             `log DEBUG`
         """
-        inp = inp.upper()
-        reset_app_logger(inp)
+        level = level.upper()
+        reset_app_logger(level)
+        self.console.print(f"Set logging to '{level}'")
         return
 
     def do_quiet(self, inp):
@@ -105,11 +107,16 @@ class Shell(Cmd):
 
     @app_logger.catch
     def do_tasks(self, inp):
-        """Lists all registered tasks (in topological order)."""
-        app_logger.log("APP", "Listing registered tasks...")
+        """Lists all Tasks in the Pipeline."""
+        cached = list(self.pipeline.cache.iterkeys())
+        self.logger.log("APP", "Listing registered tasks...")
         self.console.print("Registered Tasks:")
-        for task in self.pipeline.tasks(False):
-            self.console.print(f"- {task.name}")
+        c = 0
+        for task in self.pipeline.tasks:
+            r = " ([green]cached[/])" if task.name in cached else " ([yellow]not cached[/])"
+            self.console.print(f"- '{task.name}'" + r)
+            c += 1
+        self.console.print(f"[bright_black]Total: {c}[/]")
         return
 
     def do_peek(self, inp):
@@ -118,41 +125,84 @@ class Shell(Cmd):
         return
 
     # ========================================================================
+    # Inspection - Cache utils
+
+    def do_cachelist(self, inp):
+        """List Task names with cached results."""
+        if inp == "--all":
+            cached_names = list(self.pipeline.cache.iterkeys())
+        else:
+            cached_names = [k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")]
+        for k in cached_names:
+            self.console.print(f"- '{k}'")
+        self.console.print(f"[bright_black]Total: {len(cached_names)}[/]")
+        return
+
+    @app_logger.catch
+    def do_cacheclear(self, inp):
+        """Clear specified Task results from cache, or all data using '.' or '. --all'.
+        
+        Args:
+            task_name: The Task to clear cached data
+            --all: Clears all cached data, even those set to `expire.never`
+        """
+        inp = inp.strip()
+        ncache = len(list(self.pipeline.cache.iterkeys()))
+        if not inp:
+            # No input error
+            self.logger.error("Input required: enter a task name, or use '.'")
+            return
+
+        if inp.startswith("."):
+            if "--all" in inp:
+                self.logger.log("APP", "Clearing all cached data...")
+                self.pipeline.cache.clear()
+                self.logger.success(f"Cleared {ncache} of {ncache} cached results")
+                return
+
+            c = 0
+            self.logger.log("APP", "Clearing cached data...")
+            for t in self.pipeline.tasks:
+                if t.expire_results.__name__ != "expire_never" and t.name in self.pipeline.cache.iterkeys():
+                    self.pipeline.cache.delete(t.name)
+                    c += 1
+            self.logger.success(f"Cleared {c} of {ncache} cached results")
+            return
+        else:
+            self.logger.log("APP", f"Clearing cached data for {inp}...")
+            self.pipeline.cache.delete(inp)
+        return
+
+
+    # ========================================================================
     # Execution
 
     @app_logger.catch
     def do_execute(self, inp):
-        """Executes a task by name, or use '.' for all tasks."""
+        """Execute each Task in the Pipeline."""
         inputs = inp.split()
         task_name = inputs[0]
         force = ("--force" in inputs)
         if task_name == ".":
             self.pipeline.execute(force=force)
 
-        # Execute a single task -- assume the user knows the risks.
-        else:
-            task = self.pipeline.get_task(task_name)
-            app_logger.warning(f"Executing single task: {task_name}")
-            result = task.run()
-            self.pipeline._cache_result(task, result)
+    @app_logger.catch
+    def do_executeone(self, inp):
+        """Execute a single Task in the Pipeline."""
+        # assume the user knows the risks -- dependencies...
+        inp = inp.strip()
+        task = self.pipeline.get_task(inp)
+        self.logger.warning(f"Executing single task: {inp}")
+        result = task.run()
+        self.pipeline._cache_result(task, result)
+        # TODO: think about providing access to other task processes...
         return
 
     @app_logger.catch
     def do_validate(self, inp):
         """Validates tasks."""
-        app_logger.log("APP", "Validating...")
+        self.logger.log("APP", "Validating...")
         self.pipeline.validate_tasks()
-        return
-
-    @app_logger.catch
-    def do_clear(self, inp):
-        """Clear all data from cache."""
-        if not inp or inp == ".":
-            app_logger.log("APP", "Clearing all cached data...")
-            self.pipeline.cache.clear()
-        else:
-            app_logger.log("APP", f"Clearing cached data for {inp}...")
-            self.pipeline.cache.delete(inp)
         return
 
 
