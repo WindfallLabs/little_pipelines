@@ -127,7 +127,7 @@ class Shell(Cmd):
     def do_info(self, task_name):
         """Print the docstring of the given Task."""
         task_name = task_name.strip()
-        self.console.print(self.pipeline.get_task(task_name).__doc__)
+        self.console.print(f"[yellow]{self.pipeline.get_task(task_name).info}[/]")
         return
 
     # ========================================================================
