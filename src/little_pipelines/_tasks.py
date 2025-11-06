@@ -6,12 +6,13 @@ from inspect import currentframe
 from pathlib import Path
 from time import perf_counter_ns
 from types import ModuleType
-from typing import Any, Optional, Self, TYPE_CHECKING
+from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from loguru import _Logger
 
 from . import expire
 from . import util
+from ._exceptions import DependencyFailure
 from ._hashing import hash_file, hash_files
 from ._logger import make_logger
 
@@ -45,6 +46,7 @@ class Task:
             name: str,
             dependencies: Optional[list[str]] = None,
             expire_results: Optional[Callable] = None,
+            if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
             input_files: Optional[list[Path | str]] = None,
             hash_inputs: bool = True,
         ):
@@ -62,6 +64,7 @@ class Task:
         self._name: str = name
         self._dependency_names: list[str] = dependencies if dependencies else list()
         self.expire_results = expire_results or expire.after_session(name)
+        self.if_upstream_errors = if_upstream_errors
 
         self._process_times = []
         self._executed = False
@@ -110,6 +113,10 @@ class Task:
 
     @is_skipped.setter
     def is_skipped(self, value: bool):
+        try:
+            self.logger.debug(f"Skipped: {value}")
+        except AttributeError:
+            pass
         self._skipped = value
 
     @property
@@ -172,16 +179,18 @@ class Task:
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> None:
             func_name: str = func.__name__
+            _spaces = self.pipeline._max_task_name_len
+            # _log_base = f"{self.name.ljust(_spaces)}:"  # TODO: make all debug logging look the same
 
-            # Pre-`run` stuff
+            # Pre-`run` stuff - debug at the task-level
             if func_name == "run":
-                self.logger.info(f"{self.name} : Running...")
+                self.logger.debug(f"{self.name} : Running...")
                 self.logger.debug(f"Expiry: {self.expire_results.__name__}")
             else:
                 self.logger.debug(f"<light-black>{self.name} : Running {func_name}</>")
 
             # Start the process timer
-            _start = perf_counter_ns()  # TODO: this should be a context `with PerfCounter:`
+            _start = perf_counter_ns()  # TODO: this could be a context `with PerfCounter:`
             # Run the process
             result = func(self, *args, **kwargs)
             # Sum the process duration
@@ -191,10 +200,12 @@ class Task:
             # Post-`run` stuff
             if func_name == "run":
                 self._executed = True
-                self.logger.success(f"  DONE <light-black>(in {_time})</>")
+                self.logger.success(
+                    f"{''.ljust(_spaces)}: DONE : <light-black>(in {_time})</>"
+                )
             else:
                 self.logger.success(
-                    f"  <light-black>DONE {func_name} (in {_time})</>"
+                    f"<light-black>{''.ljust(_spaces)}: DONE : {func_name} (in {_time})</>"
                 )
             return result
 

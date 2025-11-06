@@ -216,25 +216,6 @@ class TestPipelineCheckpointing:
 class TestPipelineForcedTasks:
     """Test forcing specific tasks to re-run."""
 
-    def test_set_forced_tasks(self, clean_pipeline):
-        """Test setting forced tasks."""
-        pipeline = clean_pipeline
-
-        pipeline.set_forced("TaskA", "TaskB")
-
-        assert "TaskA" in pipeline.forced_tasks
-        assert "TaskB" in pipeline.forced_tasks
-
-    def test_clear_forced_tasks(self, clean_pipeline):
-        """Test clearing forced tasks."""
-        pipeline = clean_pipeline
-
-        pipeline.set_forced("TaskA")
-        assert len(pipeline.forced_tasks) > 0
-
-        pipeline.clear_forced()
-        assert len(pipeline.forced_tasks) == 0
-
     def test_forced_task_re_executes(self, executed_pipeline):
         """Test forced tasks re-execute despite cache."""
         pipeline, zero, one = executed_pipeline
@@ -242,8 +223,7 @@ class TestPipelineForcedTasks:
 
         pipeline.execute()
 
-        pipeline2.set_forced("One")
-        pipeline2.execute()
+        pipeline2.execute(force_tasks=["One"])
 
         # One should have executed, Zero should have used cache
         assert one2.is_executed == True
@@ -256,33 +236,14 @@ class TestPipelineForcedTasks:
 class TestPipelineIgnoredTasks:
     """Test ignoring specific tasks."""
 
-    def test_set_ignored_tasks(self, clean_pipeline):
-        """Test setting ignored tasks."""
-        pipeline = clean_pipeline
-
-        pipeline.set_ignored("TaskA", "TaskB")
-
-        assert "TaskA" in pipeline.ignored_tasks
-        assert "TaskB" in pipeline.ignored_tasks
-
-    def test_clear_ignored_tasks(self, clean_pipeline):
-        """Test clearing ignored tasks."""
-        pipeline = clean_pipeline
-
-        pipeline.set_ignored("TaskA")
-        assert len(pipeline.ignored_tasks) > 0
-
-        pipeline.clear_ignored()
-        assert len(pipeline.ignored_tasks) == 0
-
     def test_ignored_task_skipped(self, pipeline_with_tasks):
         """Test ignored tasks are skipped during execution."""
         pipeline, zero, one = pipeline_with_tasks
 
-        pipeline.set_ignored("One")
-        pipeline.execute()
+        pipeline.execute(skip_tasks=["One"])
 
         assert zero.is_executed == True
+        assert zero.is_skipped == False
         assert one.is_executed == False
         assert one.is_skipped == True
 
@@ -290,9 +251,7 @@ class TestPipelineIgnoredTasks:
         """Test forced tasks execute even if ignored."""
         pipeline, zero, one = pipeline_with_tasks
 
-        pipeline.set_ignored("One")
-        pipeline.set_forced("One")
-        pipeline.execute()
+        pipeline.execute(force_tasks=["One"], skip_tasks=["One"])
 
         # Forced should override ignored
         assert one.is_executed == True
@@ -344,8 +303,7 @@ class TestPipelineCompletion:
         """Test pipeline is complete even with skipped tasks."""
         pipeline, zero, one = pipeline_with_tasks
 
-        pipeline.set_ignored("One")
-        pipeline.execute()
+        pipeline.execute(skip_tasks=["One"])
 
         assert pipeline.is_complete == True
 

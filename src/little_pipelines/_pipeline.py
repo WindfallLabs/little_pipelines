@@ -9,9 +9,11 @@ from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 from . import util
 from . import expire
 from ._cache import get_cache
+from ._exceptions import DependencyFailure
 from ._logger import app_logger
 
 if TYPE_CHECKING:
+    from diskcache import Cache
     from ._tasks import Task
 
 
@@ -35,12 +37,14 @@ class Pipeline:
         self.name = name
         self.expire_results_if_none = expire_results_if_none
 
-        self.cache = get_cache(name)
         self._tasks: list["Task"] = []
-        self.ignored_tasks: list[str] = []
-        self.forced_tasks: list[str] = []
+        self.failures: set = set()
+
+        # Mount the cache
+        self.cache: "Cache" = get_cache(name)
 
         self._log_dir: Optional[Path] = None
+        self._shell: Optional[str] = None
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -59,12 +63,12 @@ class Pipeline:
         return self.cache.directory
 
     @property
-    def ntasks(self):
+    def ntasks(self) -> int:
         """Task count."""
         return len(self._tasks)
 
     @cached_property
-    def _max_task_name_len(self):
+    def _max_task_name_len(self) -> int:
         """Names of all tasks."""
         return 1 + max([len(t.name) for t in self.tasks])
 
@@ -85,25 +89,21 @@ class Pipeline:
             self._tasks.append(task)
         return
 
-    def set_forced(self, *forced_tasks: str) -> None:
-        """Task names for forced execution."""
-        self.forced_tasks.extend(forced_tasks)
-        return
-
-    def clear_forced(self):
-        """Clears forced tasks."""
-        self.forced_tasks = []
-        return
-
-    def set_ignored(self, *ignored_tasks: str) -> None:
-        """Task names to ignore during execution."""
-        self.ignored_tasks.extend(ignored_tasks)
-        return
-
-    def clear_ignored(self):
-        """Clears ignored tasks."""
-        self.ignored_tasks = []
-        return
+    def check_failed_dependencies(self, task: "Task") -> bool:
+        """Checks if the Task's dependencies have failed.
+        
+        Raises DependencyFailure
+        Returns Boolean
+        """
+        failed_deps = set(task.dependencies).intersection(self.failures)
+        if failed_deps != set():
+            msg = f"Failed dependencies: {failed_deps}"
+            if task.if_upstream_errors == "FAIL":
+                raise DependencyFailure(msg)
+            else:
+                task.logger.warning(msg)
+            return True
+        return False
 
     def get_task(self, task_name: str):
         """Gets a task by name."""
@@ -153,6 +153,8 @@ class Pipeline:
     def execute(
         self,
         force = False,
+        force_tasks: Optional[list[str]] = None,
+        skip_tasks: Optional[list[str]] = None,
     ) -> None:
         """
         Execute the pipeline.
@@ -161,6 +163,14 @@ class Pipeline:
             force (bool): Clears all previously cached results before execution
         """
         _start = perf_counter_ns()
+
+        if not force_tasks:
+            force_tasks = []
+        if not skip_tasks:
+            skip_tasks = []
+        nexec = 0
+        nskip = 0
+        nfail = 0
 
         # Validate all tasks have run methods
         self.validate_tasks()
@@ -171,39 +181,79 @@ class Pipeline:
             self.cache.evict("RESULTS")
 
         # Execute tasks in order
-        app_logger.log("APP", f"Executing pipeline '{self.name}'...")
+        #app_logger.log("APP", f"Executing pipeline '{self.name}'...")
+        app_logger.log("APP", f"{'Starting pipeline...'.ljust(self._max_task_name_len)}: EXEC : '{self.name}'")
+        app_logger.debug(f"Shell: {self._shell}")
 
-        for task in self.tasks:
+        tasks = list(self.tasks)
+        for task in tasks:
+            #task._executed = False  # Reset
+            #task._skipped = False  # Reset
+            task_log_base = f"{task.name.ljust(self._max_task_name_len)}:"
 
             # Handle ignored tasks
-            if task.name in self.ignored_tasks and task.name not in self.forced_tasks:
-                app_logger.warning(f"IGNORE {task.name}")
+            if task.name in skip_tasks and task.name not in force_tasks:
+                task.logger.warning(f"{task_log_base} SKIP : Skipped per user")
                 task.is_skipped = True
+                nskip += 1
                 continue
 
             # Try to use cached results
             cached_hashes = self.cache.get(task.name + "_hashes", default=dict())
             has_same_script = (cached_hashes.get("script") == task._script_hash)
             has_same_inputs = (cached_hashes.get("inputs") == task._inputs_hash)
-            app_logger.debug(f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}")
+            task.logger.debug(
+                f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}"
+            )
             # Will be None if force=True
             cached_results = self.cache.get(task.name)
 
             if (cached_results is not None and has_same_inputs and has_same_script):
-                app_logger.warning(
-                    f"{task.name.ljust(self._max_task_name_len)}: SKIP : Using cached results ({type(task.result).__name__})"
+                task.logger.warning(
+                    f"{task_log_base} SKIP : Using cached results ({type(task.result).__name__})"
                 )
                 task.is_skipped = True
+                nskip += 1
                 continue
 
+            # ================================================================
             # Execute task
-            result = task.run()
-            self._cache_result(task, result)
+
+            try:
+                task.logger.info(
+                    f"{task_log_base} EXEC : Running..."
+                )
+                # Handle if upstream tasks (dependencies) failed
+                if self.check_failed_dependencies(task):  # Raises or returns bool
+                    task.is_skipped = True
+                    nskip += 1
+                    continue
+
+                # Execute
+                result = task.run()
+                self._cache_result(task, result)
+                nexec += 1
+
+            except Exception as e:
+                self.failures.add(task.name)
+                task.logger.error(
+                    f"{task_log_base} FAIL : {e}"
+                )
+                nfail += 1
+
+        # ====================================================================
+        # Post Execution
+        #nexec = len([t for t in tasks if t.is_executed is True])
+        #nskipped = len([t for t in tasks if t.is_skipped is True])
+        #nfailed = len(self.failures)
 
         _time = util.time_diff(_start, perf_counter_ns())
+        app_logger.success(f"Pipeline complete!   : DONE : <light-black>Ran {nexec}/{len(tasks)} tasks in {_time}</>")
 
-        # Processing Complete
-        app_logger.success(f"Pipeline complete! <light-black>(in {_time})</>")
+        if nskip > 0:
+            app_logger.warning(f"{''.ljust(self._max_task_name_len)}: INFO : Skipped {nskip}")
+        if nfail > 0:
+            app_logger.error(f"{''.ljust(self._max_task_name_len)}: INFO : Failed {nfail}")
 
         # Clean up - Handle on-complete expirations
         for key in expire._on_complete_deletions:

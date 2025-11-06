@@ -1,6 +1,7 @@
 """Shell"""
 import os
 from cmd import Cmd
+from getpass import getuser
 from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
@@ -31,22 +32,23 @@ class Shell(Cmd):
     def set_pipeline(self, pipeline: "Pipeline"):
         """Set the pipeline. Call this before `cmdloop`."""
         self.pipeline = pipeline
+        self.pipeline._shell = f"{self.__class__.__name__} | '{self.title}' | opened by {getuser()}"
         return self
 
     # ========================================================================
     # Exit and aliases
 
-    def do_exit(self, inp: Optional[str]):
+    def do_exit(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
         return True
 
-    def do_quit(self, inp):
+    def do_quit(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
-        return self.do_exit(inp)
+        return self.do_exit("")
 
-    def do_q(self, inp):
+    def do_q(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
-        return self.do_exit(inp)
+        return self.do_exit("")
 
     # ========================================================================
     # Hooks
@@ -65,7 +67,6 @@ class Shell(Cmd):
         return stop
 
     def preloop(self):
-        self.logger.log("APP", "Shell opened")
         self.console.print()
         self.console.rule(f"[bright_black]{self.title}[/]", style="yellow on black")
         if hasattr(self, "header"):
@@ -73,6 +74,7 @@ class Shell(Cmd):
         if self.powered_by:
             self.console.print("[bright_black]powered by Little-Pipelines[/]")
         self.console.print(f"Loaded pipeline: [bright_blue]{self.pipeline.name}[/]")
+        self.logger.log("APP", f"Welcome {getuser()}!")
         self.console.print("[green]Ready.[/]")
         return
 
@@ -105,23 +107,32 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection
 
-    @app_logger.catch
-    def do_tasks(self, inp):
-        """Lists all Tasks in the Pipeline."""
+    def _list_tasks(self):
+        """Formats the string that lists all Tasks in the Pipeline."""
         cached = list(self.pipeline.cache.iterkeys())
+        c = 0
+        tlist = []
+        for task in self.pipeline.tasks:
+            tlist.append(
+                f"- {task.name} ([green]cached[/])" if task.name in cached else f"- {task.name} ([yellow]not cached[/])"
+            )
+            c += 1
+        tlist.append(f"[bright_black]Total: {c}[/]")
+        return tlist
+
+    @app_logger.catch
+    def do_tasks(self, inp: str = ""):
+        """Lists all Tasks in the Pipeline."""
         self.logger.log("APP", "Listing registered tasks...")
         self.console.print("Registered Tasks:")
-        c = 0
-        for task in self.pipeline.tasks:
-            r = " ([green]cached[/])" if task.name in cached else " ([yellow]not cached[/])"
-            self.console.print(f"- '{task.name}'" + r)
-            c += 1
-        self.console.print(f"[bright_black]Total: {c}[/]")
+        for tmsg in self._list_tasks():
+            self.console.print(tmsg)
         return
 
-    def do_peek(self, inp):
+    def do_peek(self, task_name: str):
         """Preview cached data."""
-        print(self.pipeline.get_result(inp))
+        r = self.pipeline.get_result(task_name)
+        self.console.print(r)
         return
     
     def do_info(self, task_name):
@@ -133,15 +144,21 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection - Cache utils
 
-    def do_cachelist(self, inp):
-        """List Task names with cached results."""
+    def _list_cache(self, inp: str = ""):
+        clist = []
         if inp == "--all":
             cached_names = list(self.pipeline.cache.iterkeys())
         else:
             cached_names = [k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")]
         for k in cached_names:
-            self.console.print(f"- '{k}'")
-        self.console.print(f"[bright_black]Total: {len(cached_names)}[/]")
+            clist.append(f"- '{k}'")
+        clist.append(f"[bright_black]Total: {len(cached_names)}[/]")
+        return clist
+
+    def do_cachelist(self, inp):
+        """List Task names with cached results."""
+        for msg in self._list_cache(inp):
+            self.console.print(msg)
         return
 
     @app_logger.catch
@@ -150,17 +167,17 @@ class Shell(Cmd):
         
         Args:
             task_name: The Task to clear cached data
-            --all: Clears all cached data, even those set to `expire.never`
+            --hard: Clears all cached data, even those set to `expire.never`
         """
         inp = inp.strip()
-        ncache = len(list(self.pipeline.cache.iterkeys()))
+        ncache = len([k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")])
         if not inp:
             # No input error
             self.logger.error("Input required: enter a task name, or use '.'")
             return
 
         if inp.startswith("."):
-            if "--all" in inp:
+            if "--hard" in inp:
                 self.logger.log("APP", "Clearing all cached data...")
                 self.pipeline.cache.clear()
                 self.logger.success(f"Cleared {ncache} of {ncache} cached results")
@@ -183,18 +200,27 @@ class Shell(Cmd):
     # ========================================================================
     # Execution
 
-    @app_logger.catch
-    def do_execute(self, inp):
+    def _execute(self, inp: Optional[str] = "") -> None:
         """Execute each Task in the Pipeline."""
         inputs = inp.split()
-        task_name = inputs[0]
+        skipped = [i.replace("--skip=", "") for i in inputs if i.startswith("--skip=")]
         force = ("--force" in inputs)
-        if task_name == ".":
-            self.pipeline.execute(force=force)
+        self.pipeline.execute(force=force, skip_tasks=skipped)
+        return
 
     @app_logger.catch
-    def do_executeone(self, inp):
-        """Execute a single Task in the Pipeline."""
+    def do_execute(self, inp):
+        """Execute each Task in the Pipeline.
+        
+        Args:
+            --force: Clears cached results, thereby causing all Tasks to execute
+            --skip: Flag a Task name to be skipped
+        """
+        self._execute(inp)
+        return
+
+    def _executeone(self, inp: str) -> None:
+        """Executes a single Task in the Pipeline."""
         # assume the user knows the risks -- dependencies...
         inp = inp.strip()
         task = self.pipeline.get_task(inp)
@@ -205,7 +231,13 @@ class Shell(Cmd):
         return
 
     @app_logger.catch
-    def do_validate(self, inp):
+    def do_executeone(self, inp):
+        """Execute a single Task in the Pipeline."""
+        self._executeone(inp)
+        return
+
+    @app_logger.catch
+    def do_validate(self, inp) -> None:
         """Validates tasks."""
         self.logger.log("APP", "Validating...")
         self.pipeline.validate_tasks()

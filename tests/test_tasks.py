@@ -7,6 +7,21 @@ import little_pipelines as lp
 from .conftest import PIPELINE_NAME, DO_LOGGING
 
 
+class TestFindTasks:
+    """Test auto-finding of Tasks."""
+
+    def test_find_tasks(self):
+        """Test find_tasks"""
+        task = lp.Task(name="TestTask")
+
+        assert lp.find_tasks(locals()) == {task}
+
+    def test_find_nested_tasks(self):
+        """Test find_tasks"""
+        from . import gtask
+        assert lp.find_tasks(locals()) == {gtask.global_task}
+
+
 class TestTaskBasics:
     """Test basic Task initialization and properties."""
 
@@ -180,8 +195,7 @@ class TestTaskSkipping:
             return "should_not_run"
 
         pipeline.add(task)
-        pipeline.set_ignored("SkipTask")
-        pipeline.execute()
+        pipeline.execute(skip_tasks=["SkipTask"])
 
         assert task.is_skipped == True
         assert task.is_executed == False
