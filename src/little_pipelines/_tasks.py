@@ -179,16 +179,20 @@ class Task:
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> None:
             func_name: str = func.__name__
-            _spaces = self.pipeline._max_task_name_len
+            _spaces = 1
+            if self.pipeline:
+                _spaces = self.pipeline._max_task_name_len
             # _log_base = f"{self.name.ljust(_spaces)}:"  # TODO: make all debug logging look the same
 
             # Pre-`run` stuff - debug at the task-level
-            if func_name == "run":
-                self.logger.debug(f"{self.name} : Running...")
-                self.logger.debug(f"Expiry: {self.expire_results.__name__}")
-            else:
-                self.logger.debug(f"<light-black>{self.name} : Running {func_name}</>")
-
+            try:
+                if func_name == "run":
+                    self.logger.debug(f"{self.name} : Running...")
+                    self.logger.debug(f"Expiry: {self.expire_results.__name__}")
+                else:
+                    self.logger.debug(f"<light-black>{self.name} : Running {func_name}</>")
+            except AttributeError:
+                pass
             # Start the process timer
             _start = perf_counter_ns()  # TODO: this could be a context `with PerfCounter:`
             # Run the process
@@ -200,13 +204,19 @@ class Task:
             # Post-`run` stuff
             if func_name == "run":
                 self._executed = True
-                self.logger.success(
-                    f"{''.ljust(_spaces)}: DONE : <light-black>(in {_time})</>"
-                )
+                try:
+                    self.logger.success(
+                        f"{''.ljust(_spaces)}: DONE : <light-black>(in {_time})</>"
+                    )
+                except AttributeError:
+                    pass
             else:
-                self.logger.success(
-                    f"<light-black>{''.ljust(_spaces)}: DONE : {func_name} (in {_time})</>"
-                )
+                try:
+                    self.logger.success(
+                        f"<light-black>{''.ljust(_spaces)}: DONE : {func_name} (in {_time})</>"
+                    )
+                except AttributeError:
+                    pass
             return result
 
         # Register the custom process with the Task
