@@ -161,23 +161,26 @@ class Shell(Cmd):
             self.console.print(msg)
         return
 
+    def do_list_cache(self, inp):
+        return self.do_cachlist(inp)
+
     @app_logger.catch
-    def do_cacheclear(self, inp):
+    def do_cacheclear(self, task_name: str):
         """Clear specified Task results from cache, or all data using '.' or '. --all'.
         
         Args:
             task_name: The Task to clear cached data
             --hard: Clears all cached data, even those set to `expire.never`
         """
-        inp = inp.strip()
+        task_name = task_name.strip()
         ncache = len([k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")])
-        if not inp:
+        if not task_name:
             # No input error
             self.logger.error("Input required: enter a task name, or use '.'")
             return
 
-        if inp.startswith("."):
-            if "--hard" in inp:
+        if task_name.startswith("."):
+            if "--hard" in task_name:
                 self.logger.log("APP", "Clearing all cached data...")
                 self.pipeline.cache.clear()
                 self.logger.success(f"Cleared {ncache} of {ncache} cached results")
@@ -192,9 +195,12 @@ class Shell(Cmd):
             self.logger.success(f"Cleared {c} of {ncache} cached results")
             return
         else:
-            self.logger.log("APP", f"Clearing cached data for {inp}...")
-            self.pipeline.cache.delete(inp)
+            self.logger.log("APP", f"Clearing cached data for {task_name}...")
+            self.pipeline.cache.delete(task_name)
         return
+
+    def do_clear_cache(self, task_name: str):
+        return self.do_cacheclear(task_name)
 
 
     # ========================================================================
