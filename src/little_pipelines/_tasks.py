@@ -161,7 +161,10 @@ class Task:
 
     @property
     def _script_hash(self):
-        return hash_file(self._script_path)
+        try:
+            return hash_file(self._script_path)
+        except:
+            return ""
 
     @property
     def _inputs_hash(self):

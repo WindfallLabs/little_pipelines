@@ -94,10 +94,14 @@ run()
 
 ```
 
-_Console output showing initial execution and when using cached results_  
-<img src="resources/Example1.png">  
+_Console output showing initial execution_  
+<img src="resources/Example1-1.png">  
 
-Notice how TaskThree was executed on the second run becauase of the `expire.on_complete()` expiry.
+_Console output showing subsequent execution_  
+<img src="resources/Example1-2.png">  
+
+Notice how TaskThree _was_ executed on the second run becauase of the `expire.on_complete()` expiry.
+
 
 ### Example 2
 ```python
@@ -133,13 +137,17 @@ def run(this):  # 'this' is a self-like reference to the Task instance
     return data  # ["Some", "values", "more", "values", "OK"]
 
 
-pipeline = lp.Pipeline("tests")
+pipeline = lp.Pipeline("Example2")
 pipeline.add(one, zero)  # Order doesn't matter
 pipeline.execute()
 
 print(pipeline.get_result("One"))  # '["Some", "values", "more", "values", "OK"]'
 
 ```
+
+_Console output showing execution_  
+<img src="resources/Example2.png">  
+
 
 ## The Big Picture
 

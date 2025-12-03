@@ -1,5 +1,6 @@
 """Shell"""
 import os
+import re
 from cmd import Cmd
 from getpass import getuser
 from typing import Literal, Optional, TYPE_CHECKING
@@ -83,8 +84,13 @@ class Shell(Cmd):
         self.console.rule(style="yellow")
         return
 
-    def precmd(self, line):
-         return line
+    def precmd(self, line: str):
+        """Process all initial input"""
+        # Tolerance (syntax sugar) for dashes in function calls
+        line = re.sub(r"^\S+", lambda x: x.group(0).replace("-", "_"), line)
+        # Including when entered after "help"
+        line = re.sub(r"^help \S+", lambda x: x.group(0).replace("-", "_"), line)
+        return line
 
     # ========================================================================
     # Config
@@ -155,17 +161,14 @@ class Shell(Cmd):
         clist.append(f"[bright_black]Total: {len(cached_names)}[/]")
         return clist
 
-    def do_cachelist(self, inp):
+    def do_list_cache(self, inp):
         """List Task names with cached results."""
         for msg in self._list_cache(inp):
             self.console.print(msg)
         return
 
-    def do_list_cache(self, inp):
-        return self.do_cachlist(inp)
-
     @app_logger.catch
-    def do_cacheclear(self, task_name: str):
+    def do_clear_cache(self, task_name: str):
         """Clear specified Task results from cache, or all data using '.' or '. --all'.
         
         Args:
@@ -198,9 +201,6 @@ class Shell(Cmd):
             self.logger.log("APP", f"Clearing cached data for {task_name}...")
             self.pipeline.cache.delete(task_name)
         return
-
-    def do_clear_cache(self, task_name: str):
-        return self.do_cacheclear(task_name)
 
 
     # ========================================================================

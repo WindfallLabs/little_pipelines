@@ -1,10 +1,10 @@
 [project]
 name = "little-pipelines"
 version = "0.1.0"
-description = "Add your description here"
+description = "Data processing pipeline and task library."
 readme = "README.md"
 authors = [
-    { name = "Garin Wally", email = "gwally@mountainline.com" }
+    { name = "Garin Wally", email = "garwall101@gmail.com" }
 ]
 requires-python = ">=3.13"
 dependencies = [
