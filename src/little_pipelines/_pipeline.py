@@ -9,7 +9,7 @@ from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 from . import util
 from . import expire
 from ._cache import get_cache
-from ._exceptions import DependencyFailure
+from ._exceptions import DependencyFailure, PipelineValidationError
 from ._logger import app_logger
 
 if TYPE_CHECKING:
@@ -117,10 +117,18 @@ class Pipeline:
     def validate_tasks(self):
         """Pre-flight checks."""
         run_errors: list[str] = []
+
+        # Check if task has run method (required)
         for task in self._tasks:  # Unsorted
-            # Check if task has run method (required)
             if not hasattr(task, "run"):
                 run_errors.append(task.name)
+
+        # Check if task dependencies are imported
+        # TODO: improve this so that the error returns a list of all invalid deps
+        try:
+            list(self.tasks)  # TODO: this is a shorthand workaround for now
+        except KeyError as e:
+            raise PipelineValidationError(f"Missing dependency for TODO: {e}")  # TODO: task name
 
         # TODO: More checks?
 

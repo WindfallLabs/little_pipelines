@@ -9,3 +9,8 @@ class DependencyFailure(Exception):
 class TaskNotFoundError(Exception):
     """Exception raised when a specific Task is not found in the registry."""
     pass
+
+
+class PipelineValidationError(Exception):
+    """Excpetion raised on invalid pipeline."""
+    pass
