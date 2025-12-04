@@ -155,6 +155,7 @@ class Pipeline:
         force = False,
         force_tasks: Optional[list[str]] = None,
         skip_tasks: Optional[list[str]] = None,
+        single_task: str = "",
     ) -> None:
         """
         Execute the pipeline.
@@ -180,12 +181,17 @@ class Pipeline:
             app_logger.info("Clearing cache (force=True)")
             self.cache.evict("RESULTS")
 
-        # Execute tasks in order
-        #app_logger.log("APP", f"Executing pipeline '{self.name}'...")
-        app_logger.log("APP", f"{'Starting pipeline...'.ljust(self._max_task_name_len)}: EXEC : '{self.name}'")
+        # Extract tasks from generator
+        tasks = list(self.tasks)
+        # TODO: Support execution of only one task, optionally without executing upstream dependencies
+        if single_task:
+            tasks = [t for t in self.tasks if t.name == single_task]
+            # TODO: upstream deps
+
+        # Log
+        app_logger.log("APP", f"{'Starting pipeline...'.ljust(self._max_task_name_len)}: EXEC : '{self.name}' ({len(tasks)} tasks)")
         app_logger.debug(f"Shell: {self._shell}")
 
-        tasks = list(self.tasks)
         for task in tasks:
             #task._executed = False  # Reset
             #task._skipped = False  # Reset

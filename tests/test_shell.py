@@ -43,7 +43,7 @@ def test_shell_inspect(pipeline_with_tasks, create_shell):
     shell = create_shell
     shell.set_pipeline(pipeline)
 
-    assert shell._list_tasks() == [
+    assert shell._listify_tasks() == [
         "- Zero ([yellow]not cached[/])",
         "- One ([yellow]not cached[/])",
         "[bright_black]Total: 2[/]",
@@ -54,7 +54,7 @@ def test_shell_inspect(pipeline_with_tasks, create_shell):
 
     shell._execute()
 
-    assert shell._list_tasks() == [
+    assert shell._listify_tasks() == [
         "- Zero ([green]cached[/])",
         "- One ([green]cached[/])",
         "[bright_black]Total: 2[/]",

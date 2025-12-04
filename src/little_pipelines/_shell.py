@@ -113,9 +113,10 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection
 
-    def _list_tasks(self):
+    def _listify_tasks(self):
         """Formats the string that lists all Tasks in the Pipeline."""
         cached = list(self.pipeline.cache.iterkeys())
+        # TODO: check expiry or value is None
         c = 0
         tlist = []
         for task in self.pipeline.tasks:
@@ -127,12 +128,12 @@ class Shell(Cmd):
         return tlist
 
     @app_logger.catch
-    def do_tasks(self, inp: str = ""):
+    def do_list_tasks(self, inp: str = ""):
         """Lists all Tasks in the Pipeline."""
         self.logger.log("APP", "Listing registered tasks...")
         self.console.print("Registered Tasks:")
-        for tmsg in self._list_tasks():
-            self.console.print(tmsg)
+        for task_str in self._listify_tasks():
+            self.console.print(task_str)
         return
 
     def do_peek(self, task_name: str):
@@ -226,14 +227,19 @@ class Shell(Cmd):
         return
 
     def _executeone(self, inp: str) -> None:
-        """Executes a single Task in the Pipeline."""
-        # assume the user knows the risks -- dependencies...
-        inp = inp.strip()
-        task = self.pipeline.get_task(inp)
-        self.logger.warning(f"Executing single task: {inp}")
-        result = task.run()
-        self.pipeline._cache_result(task, result)
-        # TODO: think about providing access to other task processes...
+        """Executes a single Task in the Pipeline.
+        
+        Args:
+            --no-deps: Do not run upstream dependencies (default False)
+        """
+        no_deps: bool = "--no-deps" in inp
+        task_name = inp.strip().split(" ")[0]
+        if no_deps is True:
+            self.logger.warning(f"Executing {task_name} without dependencies")
+        else:
+            # TODO: run upstream dependencies (do this in pipeline.py:execute)
+            raise NotImplementedError("Execution of upstream dependencies is not yet supported")
+        self.pipeline.execute(single_task=task_name)  # TODO: expose other params
         return
 
     @app_logger.catch
