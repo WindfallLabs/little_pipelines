@@ -1,4 +1,6 @@
-"""Shell"""
+"""
+Little Pipelines Shell
+"""
 import os
 import re
 from cmd import Cmd
@@ -238,7 +240,9 @@ class Shell(Cmd):
             self.logger.warning(f"Executing {task_name} without dependencies")
         else:
             # TODO: run upstream dependencies (do this in pipeline.py:execute)
-            raise NotImplementedError("Execution of upstream dependencies is not yet supported")
+            raise NotImplementedError(
+                "Execution of upstream dependencies is not yet supported. Use `--no-deps`"
+            )
         self.pipeline.execute(single_task=task_name)  # TODO: expose other params
         return
 
