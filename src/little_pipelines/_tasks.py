@@ -1,5 +1,6 @@
 """Tasks"""
 
+import os
 from collections.abc import Callable
 from functools import wraps
 from inspect import currentframe
@@ -18,6 +19,8 @@ from ._logger import make_logger
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline  # BUG: doesn't work as expected
+
+DEFAULT_LOG_DIR = Path().home() / ".little_pipelines" / "logs"
 
 
 def find_tasks(vars, nested=True):
@@ -83,17 +86,20 @@ class Task:
 
         self._pipeline: Optional["Pipeline"] = None
 
-        # Logging setup - None at init, built at pipeline.add()
-        self.logger: Optional[_Logger] = None
-        self._enable_logging = True
+        # Create a logger at either the default location or user's LOG_DIR environment
+        self.logger: _Logger = self._build_logger()
 
     def _build_logger(self) -> None:
-        if self.logger is None:
-            self.logger: _Logger = make_logger(
-                self.name,
-                filename=self.log_dir if self._enable_logging else None,
-            )
-        return
+        """Build a logger."""
+        log_dir = Path(os.environ.get("LOG_DIR", DEFAULT_LOG_DIR))
+        if not log_dir.exists():
+            log_dir.mkdir()
+        log_file = log_dir / f"{self.name}.log"
+
+        return make_logger(
+            self.name,
+            filename=log_file
+        )
 
     # ========================================================================
     # Properties
@@ -136,22 +142,10 @@ class Task:
     def pipeline(self, pipeline: "Pipeline") -> None:
         self._pipeline = pipeline
         # Additional on-add hooks
-        self._build_logger()
+        #self.logger = self._build_logger()
         self.logger.debug(f"Added to pipeline: '{pipeline.name}'")
-        self.logger.debug("Logger built")
+        #self.logger.debug("Logger rebuilt")
         return
-
-    @property
-    def log_dir(self) -> Path|None:
-        if not self._enable_logging:
-            return
-        if self.pipeline:
-            pipe_name = self.pipeline.name
-            return (
-                Path().home() / ".little_pipelines"
-                / pipe_name / "logs" / f"{self.name}.log"
-            )
-        return None
 
     @property
     def result(self) -> Any:
