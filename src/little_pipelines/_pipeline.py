@@ -262,7 +262,7 @@ class Pipeline:
         #nfailed = len(self.failures)
 
         _time = util.time_diff(_start, perf_counter_ns())
-        app_logger.success(f"Pipeline complete!   : DONE : <light-black>Ran {nexec}/{len(tasks)} tasks in {_time}</>")
+        app_logger.success(f"{'Pipeline complete!'.ljust(self._max_task_name_len)}: DONE : <light-black>Ran {nexec}/{len(tasks)} tasks in {_time}</>")
 
         if nskip > 0:
             app_logger.warning(f"{''.ljust(self._max_task_name_len)}: INFO : Skipped {nskip}")
