@@ -69,8 +69,9 @@ class Shell(Cmd):
             self.logger.success("<light-black>End.</>")
         return stop
 
-    def preloop(self):
-        self.console.print()
+    def _default_startup(self, err: Optional[str]=None):
+        """Default shell-start behavior."""
+        self.console.clear()
         self.console.rule(f"[bright_black]{self.title}[/]", style="yellow on black")
         if hasattr(self, "header"):
             self.console.print(self.header)
@@ -79,11 +80,49 @@ class Shell(Cmd):
         self.console.print(f"Loaded pipeline: [bright_blue]{self.pipeline.name}[/]")
         self.logger.log("APP", f"Welcome {getuser()}!")
         self.console.print("[green]Ready.[/]")
+        if err:
+            self.console.print(f"[red]An error in `startup` occured: {err}[/]")
+        return
+
+    def _default_shutdown(self, err: Optional[str]=None):
+        """Default shell-close behavior."""
+        self.logger.log("APP", "Shell closed")
+        if err:
+            self.console.print(f"[red]An error in `shutdown` occured: {err}[/]")
+        self.console.rule(style="yellow")
+        self.console.print()
+        return
+
+    def preloop(self):
+        """
+        Required for starting the CLI utility.
+        Uses the user-defined 'startup' method, if exists.
+        """
+        if hasattr(self, "startup"):
+            try:
+                getattr(self, "startup")()
+                return
+            except Exception as e:
+                self._default_startup(err=e)
+                return
+        else:
+            self._default_startup()
         return
 
     def postloop(self):
-        self.logger.log("APP", "Shell closed")
-        self.console.rule(style="yellow")
+        """
+        Required for shutting down the CLI utility.
+        Uses the user-defined 'shutdown' method, if exists.
+        """
+        if hasattr(self, "shutdown"):
+            try:
+                getattr(self, "shutdown")()
+                return
+            except Exception as e:
+                self._default_shutdown(err=e)
+                return
+        else:
+            self._default_shutdown()
         return
 
     def precmd(self, line: str):
