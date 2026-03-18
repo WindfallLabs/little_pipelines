@@ -1,19 +1,21 @@
 """Pipeline execution with checkpointing."""
 
+# BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
+
 from functools import cached_property
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
+from . import _messages as msg
 from . import util
-from . import expire
-from ._cache import get_cache
+from .cache import Cache, CachedResult, default_cache
 from ._exceptions import DependencyFailure, PipelineValidationError
-from ._logger import app_logger
+#from ._logger import app_logger
 
 if TYPE_CHECKING:
-    from diskcache import Cache
+    #from diskcache import Cache
     from ._tasks import Task
 
 
@@ -26,6 +28,7 @@ class Pipeline:
         self,
         name: str,
         expire_results_if_none: bool = True,
+        cache: Optional[Cache] = None,
     ):
         """
         Initialize a pipeline.
@@ -36,15 +39,15 @@ class Pipeline:
         """
         self.name = name
         self.expire_results_if_none = expire_results_if_none
+        self.cache = cache  # TODO: more
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
 
-        # Mount the cache
-        self.cache: "Cache" = get_cache(name)
-
-        self._log_dir: Optional[Path] = None
-        self._shell: Optional[str] = None
+        # Cache
+        self.cache: Cache = default_cache if cache is None else cache
+        #self.logger: _Logger = build_logger(name)
+        #self._log_dir: Optional[Path] = None
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -55,22 +58,30 @@ class Pipeline:
         """If all Pipeline Tasks have been completed."""
         return all([task.is_executed or task.is_skipped for task in self.tasks])
 
-    @property
-    def log_dir(self):
-        """Pipeline-specific log directory."""
-        if self._log_dir:
-            return self._log_dir
-        return self.cache.directory
+    # @property
+    # def log_dir(self):
+    #     """Pipeline-specific log directory."""
+    #     if self._log_dir:
+    #         return self._log_dir
+    #     return
 
     @property
     def ntasks(self) -> int:
         """Task count."""
         return len(self._tasks)
 
-    @cached_property
-    def _max_task_name_len(self) -> int:
-        """Names of all tasks."""
-        return 1 + max([len(t.name) for t in self.tasks])
+    #@cached_property
+    # @property
+    # def _max_task_name_len(self) -> int:
+    #     """Names of all tasks."""
+    #     return 1 + max([len(t.name) for t in self.tasks])
+
+    #@cached_property
+    @property
+    def message(self) -> msg.Message:
+        """Handle writing to the console."""
+        msg_len = 1 + max([len(t.name) for t in self.tasks])
+        return msg.Message(msg_len)
 
     @property
     def tasks(self) -> Generator["Task"]:
@@ -79,7 +90,7 @@ class Pipeline:
             dep.name: dep._dependency_names for dep in self._tasks
         }
         for cls_name in TopologicalSorter(deps).static_order():
-            task = self.get_task(cls_name)
+            task: "Task" = self.get_task(cls_name)
             yield task
 
     def add(self, *tasks: "Task") -> None:
@@ -98,21 +109,66 @@ class Pipeline:
         failed_deps = set(task.dependencies).intersection(self.failures)
         if failed_deps != set():
             msg = f"Failed dependencies: {failed_deps}"
-            if task.if_upstream_errors == "FAIL":
-                raise DependencyFailure(msg)
-            else:
-                task.logger.warning(msg)
+            #if task.if_upstream_errors == "FAIL":
+            #    raise DependencyFailure(msg)
+            #else:
+            #    task.logger.warning(msg)
             return True
         return False
 
     def get_task(self, task_name: str):
         """Gets a task by name."""
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
-        return task_lookup[task_name]  # We want this to error if need be
+        return task_lookup[task_name]  # TODO: We want this to error if need be
 
-    def get_result(self, task_name: str):
-        """Gets a Task's result from the cache."""
-        return self.cache.get(task_name)
+    def get_result(self, task_name: str) -> Any:
+        """
+        Gets a Task's result from the cache.
+        Raises KeyError if result or task doesn't exist.
+        """
+        # Return cached data if exists
+        #if task_name in self.cache.keys():
+        try:
+            result: CachedResult | None = self.cache.get(task_name)
+            if result:  # TODO: and not result.is_expired()
+                return result.value
+        except KeyError:
+            pass  # Continue to next try-block
+
+        # Run the task and return the result
+        try:
+            task: "Task" = self.get_task(task_name)
+            r = task.run()
+            return r
+        except KeyError:
+            raise KeyError(f"No such task: '{task_name}'")
+        except AttributeError:
+            raise AttributeError("Task is not associated with a Pipeline")
+
+    def reload_tasks(self, task_name: Optional[str] = ""):
+        """Reloads task source code to apply any changes to task source code to the pipeline."""
+        import importlib.util
+        from little_pipelines import Task
+
+        for task in self.tasks:
+            if task_name and task.name != task_name:
+                continue  # Skip until named task is found, if named task
+            # Get the script containing the task's source code / definition as a module
+            spec = importlib.util.spec_from_file_location(
+                Path(task._script_path).name.strip(".py"),
+                task._script_path
+            )
+            module = importlib.util.module_from_spec(spec)
+            # Re-import
+            spec.loader.exec_module(module)
+            # Rebuild the task on the pipeline
+            idx = self._tasks.index(task)  # Index of task on the pipeline
+            # Get the variable name in the module
+            task_var_name = [k for k, v in vars(module).items() if isinstance(v, Task)][0]
+            # Set the 'new' task on the pipeline
+            self._tasks[idx] = getattr(module, task_var_name)
+
+        return
 
     def validate_tasks(self):
         """Pre-flight checks."""
@@ -138,29 +194,29 @@ class Pipeline:
             )
         return
 
-    def _cache_result(self, task: "Task", result: Any):
-        """Caches task info and results."""
-        # Cache the results
-        self.cache.set(
-            task.name,
-            result,
-            expire=task.expire_results(),
-            tag="RESULTS"
-        )
-        # Cache hashes
-        self.cache.set(
-            task.name + "_hashes",
-            {
-                "script": task._script_hash,
-                "inputs": task._inputs_hash,
-            },
-            tag="HASHES"
-        )
-        return
+    # def _cache_result(self, task: "Task", result: Any):
+    #     """Caches task info and results."""
+    #     # Cache the results
+    #     self.cache.set(
+    #         task.name,
+    #         result,
+    #         #expire=task.expire_results(),
+    #         tag="RESULTS"
+    #     )
+    #     # Cache hashes
+    #     self.cache.set(
+    #         task.name + "_hashes",
+    #         {
+    #             "script": task._script_hash,
+    #             "inputs": task._inputs_hash,
+    #         },
+    #         tag="HASHES"
+    #     )
+    #     return
 
     def execute(
         self,
-        force = False,
+        force_all = False,
         force_tasks: Optional[list[str]] = None,
         skip_tasks: Optional[list[str]] = None,
         single_task: str = "",
@@ -169,7 +225,7 @@ class Pipeline:
         Execute the pipeline.
 
         Args:
-            force (bool): Clears all previously cached results before execution
+            force_all (bool): Clears all previously cached results before execution
         """
         _start = perf_counter_ns()
 
@@ -185,9 +241,9 @@ class Pipeline:
         self.validate_tasks()
 
         # Force - clears all results from cache
-        if force:
-            app_logger.info("Clearing cache (force=True)")
-            self.cache.evict("RESULTS")
+        if force_all:
+            self.message.write("Pipeline", "Clearing cache...", **msg.WARN)
+            self.cache.clear()
 
         # Extract tasks from generator
         tasks = list(self.tasks)
@@ -196,88 +252,77 @@ class Pipeline:
             tasks = [t for t in self.tasks if t.name == single_task]
             # TODO: upstream deps
 
-        # Log
-        app_logger.log("APP", f"{'Starting pipeline...'.ljust(self._max_task_name_len)}: EXEC : '{self.name}' ({len(tasks)} tasks)")
-        app_logger.debug(f"Shell: {self._shell}")
-
         for task in tasks:
-            #task._executed = False  # Reset
-            #task._skipped = False  # Reset
-            task_log_base = f"{task.name.ljust(self._max_task_name_len)}:"
-
             # Handle ignored tasks
             if task.name in skip_tasks and task.name not in force_tasks:
-                task.logger.warning(f"{task_log_base} SKIP : Skipped per user")
+                self.message.write(task.name, "Skipped (by user)", **msg.WARN)
                 task.is_skipped = True
                 nskip += 1
                 continue
 
             # Try to use cached results
-            cached_hashes = self.cache.get(task.name + "_hashes", default=dict())
-            has_same_script = (cached_hashes.get("script") == task._script_hash)
-            has_same_inputs = (cached_hashes.get("inputs") == task._inputs_hash)
-            task.logger.debug(
-                f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}"
-            )
-            # Will be None if force=True
-            cached_results = self.cache.get(task.name)
+            # cached_hashes = self.cache.get(task.name + "_hashes", default=dict())
+            # has_same_script = (cached_hashes.get("script") == task._script_hash)
+            # has_same_inputs = (cached_hashes.get("inputs") == task._inputs_hash)
+            # task.logger.debug(
+            #     f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}"
+            # )
+            # # Will be None if force=True
+            # cached_results = self.cache.get(task.name)
 
-            if (cached_results is not None and has_same_inputs and has_same_script):
-                task.logger.warning(
-                    f"{task_log_base} SKIP : Using cached results ({type(task.result).__name__})"
-                )
-                task.is_skipped = True
-                nskip += 1
-                continue
+            # if (cached_results is not None and has_same_inputs and has_same_script):
+            #     task.logger.warning(
+            #         f"{task_log_base} SKIP : Using cached results ({type(task.result).__name__})"
+            #     )
+            #     task.is_skipped = True
+            #     nskip += 1
+            #     continue
 
             # ================================================================
             # Execute task
 
             try:
-                task.logger.info(
-                    f"{task_log_base} EXEC : Running..."
-                )
                 # Handle if upstream tasks (dependencies) failed
                 if self.check_failed_dependencies(task):  # Raises or returns bool
                     task.is_skipped = True
                     nskip += 1
+                    #self.message.write(task.name, "Task ...?", **msg.WARN)
                     continue
 
                 # Execute
                 result = task.run()
-                self._cache_result(task, result)
+                if result is None:
+                    self.message.write(task.name, "Result is None", **msg.WARN)
                 nexec += 1
 
             except Exception as e:
                 self.failures.add(task.name)
-                task.logger.error(
-                    f"{task_log_base} FAIL : {e}"
-                )
+                self.message.write(task.name, e, **msg.FAIL)
                 nfail += 1
 
         # ====================================================================
         # Post Execution
-        #nexec = len([t for t in tasks if t.is_executed is True])
-        #nskipped = len([t for t in tasks if t.is_skipped is True])
-        #nfailed = len(self.failures)
+        nskip += len([t for t in tasks if t.is_skipped is True])
 
+        self.message.console.rule()
         _time = util.time_diff(_start, perf_counter_ns())
-        app_logger.success(f"{'Pipeline complete!'.ljust(self._max_task_name_len)}: DONE : <light-black>Ran {nexec}/{len(tasks)} tasks in {_time}</>")
+        self.message.write("Pipeline Completed", f"Ran {nexec}/{len(tasks)} tasks in {_time}", **msg.PIPELINE_COMPLETE)
 
         if nskip > 0:
-            app_logger.warning(f"{''.ljust(self._max_task_name_len)}: INFO : Skipped {nskip}")
+            self.message.write(msg=f"Skipped: {nskip} tasks", **msg.WARN)
         if nfail > 0:
-            app_logger.error(f"{''.ljust(self._max_task_name_len)}: INFO : Failed {nfail}")
+            self.message.write(msg=f"Failed: {nfail} tasks", **msg.FAIL)
+        self.message.console.rule()
 
         # Clean up - Handle on-complete expirations
-        for key in expire._on_complete_deletions:
-            app_logger.info(f"<light-black>Expiring results for {key}</>")
-            self.cache.delete(key)
-        # Clean up - Delete None results
-        if self.expire_results_if_none:
-            for key in self.cache.iterkeys():
-                if self.cache[key] is None:
-                    self.cache.delete(key)
+        # for key in expire._on_complete_deletions:
+        #     app_logger.info(f"<light-black>Expiring results for {key}</>")
+        #     self.cache.delete(key)
+        # # Clean up - Delete None results
+        # if self.expire_results_if_none:
+        #     for key in self.cache.iterkeys():
+        #         if self.cache[key] is None:
+        #             self.cache.delete(key)
 
         return
 

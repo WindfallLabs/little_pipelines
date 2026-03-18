@@ -1,6 +1,8 @@
-"""Tasks"""
+"""
+Tasks
+"""
 
-import os
+import datetime as dt
 from collections.abc import Callable
 from functools import wraps
 from inspect import currentframe
@@ -9,18 +11,14 @@ from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
-from loguru import _Logger
-
-from . import expire
+from . import _messages as msg
 from . import util
+from .cache import Cache, CachedResult, default_cache
 from ._exceptions import DependencyFailure
 from ._hashing import hash_file, hash_files
-from ._logger import make_logger
 
 if TYPE_CHECKING:
-    from ._pipeline import Pipeline  # BUG: doesn't work as expected
-
-DEFAULT_LOG_DIR = Path().home() / ".little_pipelines" / "logs"
+    from ._pipeline import Pipeline
 
 
 def find_tasks(vars, nested=True):
@@ -48,10 +46,11 @@ class Task:
             self: Self,
             name: str,
             dependencies: Optional[list[str]] = None,
-            expire_results: Optional[Callable] = None,
             if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
             input_files: Optional[list[Path | str]] = None,
             hash_inputs: bool = True,
+            cache: Optional[Cache] = None,
+            result_expiry: Optional[dt.datetime|dt.date] = None,
         ):
         """
         Initialize a Task.
@@ -63,10 +62,10 @@ class Task:
             use_cache: If True, task results will be cached for resume
             input_files: List of input file paths/patterns for hash tracking
             hash_inputs: If False, use empty string hash (for API/DB inputs)
+            cache: Uses Pipeline's cache, default cache, or user-provided cache
         """
         self._name: str = name
         self._dependency_names: list[str] = dependencies if dependencies else list()
-        self.expire_results = expire_results or expire.after_session(name)
         self.if_upstream_errors = if_upstream_errors
 
         self._process_times = []
@@ -84,22 +83,11 @@ class Task:
         self.input_files = input_files  # TODO: ??
         self.hash_inputs = hash_inputs  # TODO: ??
 
+        # Pipeline
         self._pipeline: Optional["Pipeline"] = None
-
-        # Create a logger at either the default location or user's LOG_DIR environment
-        self.logger: _Logger = self._build_logger()
-
-    def _build_logger(self) -> None:
-        """Build a logger."""
-        log_dir = Path(os.environ.get("LOG_DIR", DEFAULT_LOG_DIR))
-        if not log_dir.exists():
-            log_dir.mkdir()
-        log_file = log_dir / f"{self.name}.log"
-
-        return make_logger(
-            self.name,
-            filename=log_file
-        )
+        # Initialize a pipeline-independent cache
+        self._cache: Cache = default_cache if cache is None else cache
+        self.result_expiry = result_expiry  # NOTE: None
 
     # ========================================================================
     # Properties
@@ -120,10 +108,19 @@ class Task:
     @is_skipped.setter
     def is_skipped(self, value: bool):
         try:
-            self.logger.debug(f"Skipped: {value}")
+            #self.logger.debug(f"Skipped: {value}")
+            #self.message.write(self.name, f"Skipped {value}")
+            True  # TODO: not sure what callback is useful here
         except AttributeError:
             pass
         self._skipped = value
+
+    @property
+    def message(self):
+        # Console messaging
+        if self.pipeline:
+            return self.pipeline.message
+        return msg.Message(len(self.name))
 
     @property
     def dependencies(self) -> dict[str, Self] | None:
@@ -142,16 +139,26 @@ class Task:
     def pipeline(self, pipeline: "Pipeline") -> None:
         self._pipeline = pipeline
         # Additional on-add hooks
-        #self.logger = self._build_logger()
-        self.logger.debug(f"Added to pipeline: '{pipeline.name}'")
-        #self.logger.debug("Logger rebuilt")
+        # TODO: consider logging
         return
 
     @property
+    def cache(self):
+        """Return whatever cache is associated with the task."""
+        if self._pipeline:
+            return self.pipeline.cache
+        return self._cache
+
+    # @property
+    # def logger(self):
+    #     """Return whatever logger is associated with the task."""
+    #     if self._pipeline:
+    #         return self.pipeline.logger
+    #     return self._logger
+
+    @property
     def result(self) -> Any:
-        if self.pipeline is None:
-            return None
-        return self.pipeline.cache.get(self.name)
+        return self.cache.get(self.name).value
 
     @property
     def _script_hash(self):
@@ -168,6 +175,15 @@ class Task:
                 h = hash_files(inp)
         return h
 
+    def get_task_result(self, task_name: str):
+        """Allow tasks to access other task results."""
+        try:
+            return self.cache.get(task_name).value
+        except Exception as e:
+            pass
+        return self.pipeline.get_result(task_name)
+
+
     # ========================================================================
     # Decorators
 
@@ -175,45 +191,80 @@ class Task:
         """Wrapper for custom functions."""
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> None:
-            func_name: str = func.__name__
-            _spaces = 1
-            if self.pipeline:
-                _spaces = self.pipeline._max_task_name_len
-            # _log_base = f"{self.name.ljust(_spaces)}:"  # TODO: make all debug logging look the same
-
-            # Pre-`run` stuff - debug at the task-level
-            try:
-                if func_name == "run":
-                    self.logger.debug(f"{self.name} : Running...")
-                    self.logger.debug(f"Expiry: {self.expire_results.__name__}")
-                else:
-                    self.logger.debug(f"<light-black>{self.name} : Running {func_name}</>")
-            except AttributeError:
-                pass
+            """This code wraps around and executes the wrapped function."""
+            
+            # ----------------------------------------------------------------
+            # Pre-function call
+            # ----------------------------------------------------------------
             # Start the process timer
-            _start = perf_counter_ns()  # TODO: this could be a context `with PerfCounter:`
-            # Run the process
-            result = func(self, *args, **kwargs)
+            _start = perf_counter_ns()
+
+            # Get the wrapped function's name
+            func_name: str = func.__name__
+
+            # Is associated with a pipeline
+            has_pipeline = self.pipeline is not None
+
+            # Set cache-related vars
+            cached_result = None
+            has_cached_result = False
+
+            if func_name == "run" and has_pipeline:
+                # Print task-start message
+                self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
+                # Check if cached data
+                with self.message.console.status(f"{self.name}: Checking cache..."):
+                    try:
+                        # Attempt to get previously cached results
+                        result_obj = self.cache.get(self.name)
+                        # Cached data is not expired (implicit else keeps cached_result as None)
+                        #is_expired: bool = self.result_expiry is not None and result_obj.cdate < self.result_expiry
+                        #if not is_expired:
+                        cached_result = result_obj.value
+                        has_cached_result = cached_result is not None
+                    except KeyError:
+                        pass
+                if has_cached_result:
+                    self.message.write(self.name, "Loaded cached result", **msg.WARN)
+                    self.is_skipped = True
+            else:
+                # Print process-start message for each non-"run" function
+                self.message.write(self.name, f"Running {func_name}...", **msg.PROCESS_START)
+
+            # ----------------------------------------------------------------
+            # Wrapped function call
+            # ----------------------------------------------------------------
+            if func_name == "run":
+                if has_cached_result:
+                    result = cached_result
+                else:
+                    result = func(self, *args, **kwargs)
+            else:
+                with self.message.console.status(f"{self.name}: Running {func_name}..."):
+                    result = func(self, *args, **kwargs)
+
+            # ----------------------------------------------------------------
+            # Post-function call
+            # ----------------------------------------------------------------
+            # Cache results, if not already cached
+            if func_name == "run" and not has_cached_result:  # Don't re-cache
+                try:
+                    with self.message.console.status(f"{self.name}: Caching result..."):
+                        self.cache.set(self.name, result)  # TODO: expiry=self.result_expiry ??
+                except Exception as e:
+                    self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
+                    self.message.write(msg=e, **msg.FAIL)
+
             # Sum the process duration
             _time = util.time_diff(_start, perf_counter_ns())
+            _time_msg = f"(completed in {_time})"
             self._process_times.append((func_name, _time))
 
-            # Post-`run` stuff
             if func_name == "run":
                 self._executed = True
-                try:
-                    self.logger.success(
-                        f"{''.ljust(_spaces)}: DONE : <light-black>(in {_time})</>"
-                    )
-                except AttributeError:
-                    pass
+                self.message.write(self.name, _time_msg, **msg.TASK_COMPLETE)
             else:
-                try:
-                    self.logger.success(
-                        f"<light-black>{''.ljust(_spaces)}: DONE : {func_name} (in {_time})</>"
-                    )
-                except AttributeError:
-                    pass
+                self.message.write(self.name, _time_msg, **msg.PROCESS_COMPLETE)
             return result
 
         # Register the custom process with the Task

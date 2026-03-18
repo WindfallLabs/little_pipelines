@@ -54,9 +54,11 @@ def clean_pipeline():
 @pytest.fixture
 def sample_tasks():
     """Create sample tasks for testing (as in README example)."""
+    cache = lp.cache.DictCache()
     zero = lp.Task(
         name="Zero",
-        expire_results=lp.expire.never()
+        #expire_results=lp.expire.never()
+        cache=cache,
     )
     zero._enable_logging = DO_LOGGING
 
@@ -67,7 +69,8 @@ def sample_tasks():
     one = lp.Task(
         name="One",
         dependencies=["Zero"],
-        expire_results=lp.expire.never()
+        #expire_results=lp.expire.never()
+        cache=cache,
     )
     one._enable_logging = DO_LOGGING
 
@@ -78,7 +81,8 @@ def sample_tasks():
     @one.process
     def run(this):
         status = this.preflight()
-        data = this.pipeline.get_result("Zero")
+        #data = this.pipeline.get_result("Zero")
+        data = this.cache.get("Zero")
         data.extend(["more", "values", status])
         return data
 

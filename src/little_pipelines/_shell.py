@@ -9,7 +9,7 @@ from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
 
-from ._logger import app_logger, reset_app_logger
+from . import _messages as msg
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline
@@ -27,7 +27,11 @@ class Shell(Cmd):
     console = Console()
     powered_by = True
     pipeline: Optional["Pipeline"] = None
-    logger = app_logger
+    #logger = app_logger
+
+    @property
+    def message(self):
+        return self.pipeline.message
 
     # ========================================================================
     # Setup
@@ -43,6 +47,8 @@ class Shell(Cmd):
 
     def do_exit(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
+        #with self.message.console.status("Clearing expired results..."):
+        #    self.pipeline.cache.clear_expired()
         return True
 
     def do_quit(self, inp: str = "") -> Literal[True]:
@@ -66,7 +72,7 @@ class Shell(Cmd):
             return stop
         else:
             # Use 'End' as it doesn't indicate successful execution
-            self.logger.success("<light-black>End.</>")
+            self.message.write(**msg.SHELL_COMPLETE)
         return stop
 
     def _default_startup(self, err: Optional[str]=None):
@@ -78,7 +84,7 @@ class Shell(Cmd):
         if self.powered_by:
             self.console.print("[bright_black]powered by Little-Pipelines[/]")
         self.console.print(f"Loaded pipeline: [bright_blue]{self.pipeline.name}[/]")
-        self.logger.log("APP", f"Welcome {getuser()}!")
+        self.message.write(msg=f"Welcome {getuser()}", **msg.SHELL)
         self.console.print("[green]Ready.[/]")
         if err:
             self.console.print(f"[red]An error in `startup` occured: {err}[/]")
@@ -86,7 +92,7 @@ class Shell(Cmd):
 
     def _default_shutdown(self, err: Optional[str]=None):
         """Default shell-close behavior."""
-        self.logger.log("APP", "Shell closed")
+        self.message.write(msg="Shell closed", **msg.SHELL_COMPLETE)
         if err:
             self.console.print(f"[red]An error in `shutdown` occured: {err}[/]")
         self.console.rule(style="yellow")
@@ -142,7 +148,7 @@ class Shell(Cmd):
             `log DEBUG`
         """
         level = level.upper()
-        reset_app_logger(level)
+        #reset_app_logger(level)
         self.console.print(f"Set logging to '{level}'")
         return
 
@@ -156,7 +162,7 @@ class Shell(Cmd):
 
     def _listify_tasks(self):
         """Formats the string that lists all Tasks in the Pipeline."""
-        cached = list(self.pipeline.cache.iterkeys())
+        cached = list(self.pipeline.cache.keys())
         # TODO: check expiry or value is None
         c = 0
         tlist = []
@@ -168,10 +174,10 @@ class Shell(Cmd):
         tlist.append(f"[bright_black]Total: {c}[/]")
         return tlist
 
-    @app_logger.catch
+    #@app_logger.catch
     def do_list_tasks(self, inp: str = ""):
         """Lists all Tasks in the Pipeline."""
-        self.logger.log("APP", "Listing registered tasks...")
+        self.message.write(msg="Listing registered tasks...", **msg.SHELL)
         self.console.print("Registered Tasks:")
         for task_str in self._listify_tasks():
             self.console.print(task_str)
@@ -179,8 +185,11 @@ class Shell(Cmd):
 
     def do_peek(self, task_name: str):
         """Preview cached data."""
-        r = self.pipeline.get_result(task_name)
-        self.console.print(r)
+        try:
+            r = self.pipeline.cache.get(task_name).value
+            self.console.print(r)
+        except KeyError as e:
+            self.message.write(msg=e, **msg.SHELL_FAIL)
         return
     
     def do_info(self, task_name):
@@ -195,9 +204,9 @@ class Shell(Cmd):
     def _list_cache(self, inp: str = ""):
         clist = []
         if inp == "--all":
-            cached_names = list(self.pipeline.cache.iterkeys())
+            cached_names = self.pipeline.cache.keys()
         else:
-            cached_names = [k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")]
+            cached_names = [i for i in self.pipeline.cache.keys() if not i.endswith("_hashes")]
         for k in cached_names:
             clist.append(f"- '{k}'")
         clist.append(f"[bright_black]Total: {len(cached_names)}[/]")
@@ -209,7 +218,7 @@ class Shell(Cmd):
             self.console.print(msg)
         return
 
-    @app_logger.catch
+    #@app_logger.catch
     def do_clear_cache(self, task_name: str):
         """Clear specified Task results from cache, or all data using '.' or '. --all'.
         
@@ -217,46 +226,70 @@ class Shell(Cmd):
             task_name: The Task to clear cached data
             --hard: Clears all cached data, even those set to `expire.never`
         """
+        # TODO: raise KeyError if not exists
         task_name = task_name.strip()
-        ncache = len([k for k in self.pipeline.cache.iterkeys() if not k.endswith("_hashes")])
+        ncache = len([k for k in self.pipeline.cache.keys() if not k.endswith("_hashes")])
         if not task_name:
             # No input error
-            self.logger.error("Input required: enter a task name, or use '.'")
+            self.message.write(msg="Input required: enter a task name, or use '.'", **msg.SHELL_FAIL)
             return
 
-        if task_name.startswith("."):
+        if task_name.startswith("."):  # TODO: BUG: the console.status is wonk
             if "--hard" in task_name:
-                self.logger.log("APP", "Clearing all cached data...")
-                self.pipeline.cache.clear()
-                self.logger.success(f"Cleared {ncache} of {ncache} cached results")
+                self.message.write(msg="Clearing all cached data...", **msg.SHELL)
+                with self.message.console.status("Clearing all cached data..."):
+                    self.pipeline.cache.clear()
+                self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
                 return
 
             c = 0
-            self.logger.log("APP", "Clearing cached data...")
-            for t in self.pipeline.tasks:
-                if t.expire_results.__name__ != "expire_never" and t.name in self.pipeline.cache.iterkeys():
-                    self.pipeline.cache.delete(t.name)
+            self.message.write(msg="Clearing cached data...", **msg.SHELL)
+            for task_name in self.pipeline.cache.keys():
+                _result = self.pipeline.cache.get(task_name)
+                # Ignore expiries set to "never"
+                if not _result.keep_cached:
+                    with self.message.console.status(f"Clearing cached result for {task_name}..."):
+                        self.pipeline.cache.delete(task_name)
                     c += 1
-            self.logger.success(f"Cleared {c} of {ncache} cached results")
+            self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
             return
         else:
-            self.logger.log("APP", f"Clearing cached data for {task_name}...")
+            self.message.write(msg=f"Clearing cached data for {task_name}...", **msg.SHELL)
             self.pipeline.cache.delete(task_name)
         return
 
 
     # ========================================================================
+    def do_reload(self, inp: Optional[str] = "") -> None:
+        """Reload task definitions from source code (re-import tasks)."""
+        self.pipeline.reload_tasks(inp)
+        try:
+            self.pipeline.cache.delete(inp)
+        except:
+            pass
+        return
+
+    # ========================================================================
     # Execution
 
+    # TODO: support executing named tasks: `execute One Two`
     def _execute(self, inp: Optional[str] = "") -> None:
         """Execute each Task in the Pipeline."""
         inputs = inp.split()
         skipped = [i.replace("--skip=", "") for i in inputs if i.startswith("--skip=")]
         force = ("--force" in inputs)
-        self.pipeline.execute(force=force, skip_tasks=skipped)
+        #self.pipeline.execute(force_all=force, skip_tasks=skipped)
+        tasks = [i for i in inputs if not i.startswith("--skip") and i != "--force" and i != "."]
+        if inputs[0] == ".":
+            self.pipeline.execute(force_all=force, skip_tasks=skipped)
+        else:
+            for t in tasks:
+                if force:
+                    self.pipeline.cache.delete(t)
+                self._executeone(t)
         return
 
-    @app_logger.catch
+    #@app_logger.catch
     def do_execute(self, inp):
         """Execute each Task in the Pipeline.
         
@@ -267,6 +300,7 @@ class Shell(Cmd):
         self._execute(inp)
         return
 
+    # TODO: remove
     def _executeone(self, inp: str) -> None:
         """Executes a single Task in the Pipeline.
         
@@ -276,25 +310,24 @@ class Shell(Cmd):
         no_deps: bool = "--no-deps" in inp
         task_name = inp.strip().split(" ")[0]
         if no_deps is True:
-            self.logger.warning(f"Executing {task_name} without dependencies")
-        else:
-            # TODO: run upstream dependencies (do this in pipeline.py:execute)
-            raise NotImplementedError(
-                "Execution of upstream dependencies is not yet supported. Use `--no-deps`"
-            )
-        self.pipeline.execute(single_task=task_name)  # TODO: expose other params
+            #self.logger.warning(f"Executing {task_name} without dependencies")
+            self.message.write(msg=f"Executing {task_name} without dependencies", **msg.SHELL)
+        #self.pipeline.execute(single_task=task_name)  # TODO: expose other params
+        self.pipeline.get_task(task_name).run()
+        # TODO: BUG: prints 1/1 when done, even if multiple are fired
         return
 
-    @app_logger.catch
+    #@app_logger.catch
+    # TODO: remove
     def do_executeone(self, inp):
         """Execute a single Task in the Pipeline."""
         self._executeone(inp)
         return
 
-    @app_logger.catch
+    #@app_logger.catch
     def do_validate(self, inp) -> None:
         """Validates tasks."""
-        self.logger.log("APP", "Validating...")
+        self.message.write(msg="Validating...", **msg.SHELL)
         self.pipeline.validate_tasks()
         return
 

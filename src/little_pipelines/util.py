@@ -1,6 +1,17 @@
-"""Utils"""
+"""
+Utils
+"""
 
 import datetime as dt
+from pathlib import Path
+
+
+HOME = Path().home() / ".little_pipelines"
+DEFAULT = HOME / "DEFAULT"
+DEFAULT_LOG_DIR = DEFAULT / "logs"
+DEFAULT_CACHE_FILE = DEFAULT / "DEFAULT_CACHE"
+if not DEFAULT.exists():
+    DEFAULT.mkdir()
 
 
 def time_diff(start: float, end: float) -> str:

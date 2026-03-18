@@ -1,4 +1,10 @@
+"""
+Logger
+"""
+
 import sys
+from pathlib import Path
+from typing import Optional, Literal
 
 from loguru import logger, _Logger
 from loguru._defaults import LOGURU_FORMAT
@@ -9,8 +15,10 @@ logger.remove()
 app_fmt = '<light-black>[{time:YYYY-MM-DD HH:mm:ss.SSS}]  </light-black> <level>{message}</level>'
 _APP_LOGGER_ID = None
 
-logger.level("APP", no=20, color="<cyan>")
-logger.level("PERF", no=20, color="<light-black>")
+logger.level("APP", no=20, color="<cyan>")          # TODO: remove
+logger.level("CYAN", no=20, color="<cyan>")
+logger.level("PERF", no=20, color="<light-black>")  # TODO: remove
+logger.level("GREY", no=20, color="<light-black>")  # NEW
 
 
 def _patch(logger: _Logger) -> _Logger:
@@ -27,9 +35,9 @@ def _patch(logger: _Logger) -> _Logger:
 
 
 def make_logger(
-    name,
-    filename,
-    level="DEBUG",
+    name: str,
+    filename: Optional[Path] = None,
+    level: Literal["NOTE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL", "SUCCESS"] = "DEBUG",
     colorize=False,
     retention="30 days",
     rotation="1 MB",
@@ -37,7 +45,7 @@ def make_logger(
 ) -> _Logger:
     """
     Create a logger with consistent configuration.
-    
+
     Args:
         name: Identifier for this logger (used in log output and filtering)
         filename: Optional log file path. If provided, logs are written to this file.
