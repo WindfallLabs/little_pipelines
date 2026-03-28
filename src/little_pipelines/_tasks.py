@@ -4,7 +4,7 @@ Tasks
 
 import datetime as dt
 from collections.abc import Callable
-from functools import wraps
+from functools import cached_property, wraps
 from inspect import currentframe
 from pathlib import Path
 from time import perf_counter_ns
@@ -12,7 +12,7 @@ from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _messages as msg
-from . import util
+from . import _autodoc, util
 from .cache import Cache, CachedResult, default_cache
 from ._exceptions import DependencyFailure
 from ._hashing import hash_file, hash_files
@@ -21,11 +21,11 @@ if TYPE_CHECKING:
     from ._pipeline import Pipeline
 
 
-def find_tasks(vars, nested=True):
+def find_tasks(vars: dict[str, Any], nested=True):
     """Finds tasks - useful to `add` all Tasks to a Pipeline."""
     found_instances = set()
 
-    for name, obj in vars.items():
+    for _, obj in vars.items():
         if isinstance(obj, Task):
             found_instances.add(obj)
         elif isinstance(obj, ModuleType) and nested:
@@ -51,6 +51,8 @@ class Task:
             hash_inputs: bool = True,
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
+            cache_results: bool = False,
+            manual_execution_only: bool = False,
         ):
         """
         Initialize a Task.
@@ -63,21 +65,26 @@ class Task:
             input_files: List of input file paths/patterns for hash tracking
             hash_inputs: If False, use empty string hash (for API/DB inputs)
             cache: Uses Pipeline's cache, default cache, or user-provided cache
+            cache_results: Allow the task to save its results to the cache
         """
         self._name: str = name
         self._dependency_names: list[str] = dependencies if dependencies else list()
         self.if_upstream_errors = if_upstream_errors
+
+        # Flags for pipeline
+        self.manual_execution_only = manual_execution_only
 
         self._process_times = []
         self._executed = False
         self._skipped = False
 
         # Inspection
-        _g = currentframe().f_back.f_globals
+        # TODO: make method?
+        self._g = currentframe().f_back.f_globals
         # Get the docstring for the instance's script
-        self.info = _g.get('__doc__')
+        #self.info = _g.get('__doc__')
         # Get the filepath of the instance's script
-        self._script_path = _g.get('__file__')
+        self._script_path = self._g.get('__file__')
 
         # Hashing
         self.input_files = input_files  # TODO: ??
@@ -87,6 +94,7 @@ class Task:
         self._pipeline: Optional["Pipeline"] = None
         # Initialize a pipeline-independent cache
         self._cache: Cache = default_cache if cache is None else cache
+        self._do_cache_results = cache_results
         self.result_expiry = result_expiry  # NOTE: None
 
     # ========================================================================
@@ -96,6 +104,12 @@ class Task:
     def name(self) -> str:
         """Task name"""
         return self._name
+
+    @cached_property
+    def info(self) -> str:
+        _info = self._g.get('__doc__')
+        _info += _autodoc(self)
+        return _info
 
     @property
     def is_executed(self) -> bool:
@@ -183,7 +197,6 @@ class Task:
             pass
         return self.pipeline.get_result(task_name)
 
-
     # ========================================================================
     # Decorators
 
@@ -212,21 +225,24 @@ class Task:
             if func_name == "run" and has_pipeline:
                 # Print task-start message
                 self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
+                # ------------------------------------------------------
+                # TODO: should we do this here or at the pipeline-level?
                 # Check if cached data
-                with self.message.console.status(f"{self.name}: Checking cache..."):
-                    try:
-                        # Attempt to get previously cached results
-                        result_obj = self.cache.get(self.name)
-                        # Cached data is not expired (implicit else keeps cached_result as None)
-                        #is_expired: bool = self.result_expiry is not None and result_obj.cdate < self.result_expiry
-                        #if not is_expired:
-                        cached_result = result_obj.value
-                        has_cached_result = cached_result is not None
-                    except KeyError:
-                        pass
-                if has_cached_result:
-                    self.message.write(self.name, "Loaded cached result", **msg.WARN)
-                    self.is_skipped = True
+                if self._do_cache_results:
+                    with self.message.console.status(f"{self.name}: Checking cache..."):
+                        try:
+                            # Attempt to get previously cached results
+                            result_obj = self.cache.get(self.name)
+                            # Cached data is not expired (implicit else keeps cached_result as None)
+                            #is_expired: bool = self.result_expiry is not None and result_obj.cdate < self.result_expiry
+                            #if not is_expired:
+                            cached_result = result_obj.value
+                            has_cached_result = cached_result is not None
+                        except KeyError:
+                            pass
+                    if has_cached_result:
+                        self.message.write(self.name, "Loaded cached result", **msg.WARN)
+                        self.is_skipped = True
             else:
                 # Print process-start message for each non-"run" function
                 self.message.write(self.name, f"Running {func_name}...", **msg.PROCESS_START)

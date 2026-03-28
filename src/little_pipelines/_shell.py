@@ -9,7 +9,7 @@ from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
 
-from . import _messages as msg
+from . import _messages as msg, _autodoc
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline
@@ -47,8 +47,6 @@ class Shell(Cmd):
 
     def do_exit(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
-        #with self.message.console.status("Clearing expired results..."):
-        #    self.pipeline.cache.clear_expired()
         return True
 
     def do_quit(self, inp: str = "") -> Literal[True]:
@@ -139,18 +137,29 @@ class Shell(Cmd):
         line = re.sub(r"^help \S+", lambda x: x.group(0).replace("-", "_"), line)
         return line
 
+    def onecmd(self, line: str):
+        try:
+            return super().onecmd(line)
+        except Exception as e:
+            #e.add_note("Error caught by shell")  # TODO: could be useful?
+            #err = f"{e.__class__.__name__}: {' '.join(e.args)} ({' '.join(e.__notes__)})"
+            err = f"{e.__class__.__name__}: {' '.join(e.args)}"
+            self.message.write(msg=f"{err}", **msg.SHELL_FAIL)
+        return
+
     # ========================================================================
     # Config
 
-    def do_log(self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
-        """Sets the log level.
-        Use:
-            `log DEBUG`
-        """
-        level = level.upper()
-        #reset_app_logger(level)
-        self.console.print(f"Set logging to '{level}'")
-        return
+    # TODO:
+    # def do_log(self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
+    #     """Sets the log level.
+    #     Use:
+    #         `log DEBUG`
+    #     """
+    #     level = level.upper()
+    #     #reset_app_logger(level)
+    #     self.console.print(f"Set logging to '{level}'")
+    #     return
 
     def do_quiet(self, inp):
         """Greatly reduces message output. Sets logging level to ERROR."""
@@ -160,27 +169,17 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection
 
-    def _listify_tasks(self):
-        """Formats the string that lists all Tasks in the Pipeline."""
-        cached = list(self.pipeline.cache.keys())
-        # TODO: check expiry or value is None
-        c = 0
-        tlist = []
-        for task in self.pipeline.tasks:
-            tlist.append(
-                f"- {task.name} ([green]cached[/])" if task.name in cached else f"- {task.name} ([yellow]not cached[/])"
-            )
-            c += 1
-        tlist.append(f"[bright_black]Total: {c}[/]")
-        return tlist
-
-    #@app_logger.catch
-    def do_list_tasks(self, inp: str = ""):
+    def do_tasks(self, inp: str = ""):
         """Lists all Tasks in the Pipeline."""
         self.message.write(msg="Listing registered tasks...", **msg.SHELL)
-        self.console.print("Registered Tasks:")
-        for task_str in self._listify_tasks():
-            self.console.print(task_str)
+        task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
+        # TODO: check expiry or value is None
+        c = len(task_list)
+        for tname, has_cache in task_list:
+            self.console.print(
+                f"- {tname} ([green]cached[/])" if has_cache else f"- {tname} ([yellow]not cached[/])"
+            )
+        self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
 
     def do_peek(self, task_name: str):
@@ -192,10 +191,15 @@ class Shell(Cmd):
             self.message.write(msg=e, **msg.SHELL_FAIL)
         return
     
-    def do_info(self, task_name):
+    def do_info(self, inp: str):
         """Print the docstring of the given Task."""
-        task_name = task_name.strip()
-        self.console.print(f"[yellow]{self.pipeline.get_task(task_name).info}[/]")
+        try:
+            task_name = inp.strip()
+            task = self.pipeline.get_task(task_name)
+        except ValueError:  # Can't split input
+            raise 
+        self.console.print(f"[yellow]{task.info}[/]")
+        self.console.print(f"[bright_black]{task._script_path}[/]")
         return
 
     # ========================================================================
@@ -271,22 +275,40 @@ class Shell(Cmd):
 
     # ========================================================================
     # Execution
+    @staticmethod
+    def _get_skipped(inputs: list[str]) -> bool:
+        """Extract skip instruction from shell input (str)."""
+        return [i.replace("--skip=", "") for i in inputs if i.startswith("--skip=")]
+
+    @staticmethod
+    def _clean_kwargs(inputs: list[str]) -> dict[str, str]:
+        """Extract kwargs from shell input (str)."""
+        kwargs = dict()
+        for i in inputs:
+            if not i.startswith("--") or "=" not in i:
+                continue
+            k, v = i.removeprefix("--").split("=")  # TODO: requires '=' sep
+            kwargs[k] = v
+        return kwargs
 
     # TODO: support executing named tasks: `execute One Two`
     def _execute(self, inp: Optional[str] = "") -> None:
         """Execute each Task in the Pipeline."""
-        inputs = inp.split()
-        skipped = [i.replace("--skip=", "") for i in inputs if i.startswith("--skip=")]
-        force = ("--force" in inputs)
-        #self.pipeline.execute(force_all=force, skip_tasks=skipped)
-        tasks = [i for i in inputs if not i.startswith("--skip") and i != "--force" and i != "."]
+        inputs: list[str] = inp.split()
+        force: bool = ("--force" in inputs)
+        # Process all tasks
         if inputs[0] == ".":
-            self.pipeline.execute(force_all=force, skip_tasks=skipped)
+            skipped_tasks: list[str] = self._get_skipped(inputs)
+            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)
+        # Single task
         else:
-            for t in tasks:
-                if force:
-                    self.pipeline.cache.delete(t)
-                self._executeone(t)
+            task_name = inputs[0]
+            if task_name not in self.pipeline.list_tasks():
+                raise KeyError(f"No such task: '{task_name}'")
+            kwargs = self._clean_kwargs(inputs)
+            if force:
+                self.pipeline.cache.delete(task_name)
+            self._executeone(task_name, **kwargs)
         return
 
     #@app_logger.catch
@@ -297,36 +319,15 @@ class Shell(Cmd):
             --force: Clears cached results, thereby causing all Tasks to execute
             --skip: Flag a Task name to be skipped
         """
-        self._execute(inp)
-        return
-
-    # TODO: remove
-    def _executeone(self, inp: str) -> None:
-        """Executes a single Task in the Pipeline.
-        
-        Args:
-            --no-deps: Do not run upstream dependencies (default False)
-        """
-        no_deps: bool = "--no-deps" in inp
-        task_name = inp.strip().split(" ")[0]
-        if no_deps is True:
-            #self.logger.warning(f"Executing {task_name} without dependencies")
-            self.message.write(msg=f"Executing {task_name} without dependencies", **msg.SHELL)
-        #self.pipeline.execute(single_task=task_name)  # TODO: expose other params
-        self.pipeline.get_task(task_name).run()
-        # TODO: BUG: prints 1/1 when done, even if multiple are fired
-        return
-
-    #@app_logger.catch
-    # TODO: remove
-    def do_executeone(self, inp):
-        """Execute a single Task in the Pipeline."""
-        self._executeone(inp)
+        try:
+            self._execute(inp)
+        except Exception as e:
+            self.message.write(msg=f"Error: {e}", **msg.SHELL_FAIL)
         return
 
     #@app_logger.catch
     def do_validate(self, inp) -> None:
-        """Validates tasks."""
+        """Validates tasks."""  # TODO: more documentation -- what's this do?
         self.message.write(msg="Validating...", **msg.SHELL)
         self.pipeline.validate_tasks()
         return

@@ -2,10 +2,11 @@
 
 # BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
 
-from functools import cached_property
+#from functools import cached_property
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
+from types import ModuleType
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
@@ -99,6 +100,17 @@ class Pipeline:
             task.pipeline = self
             self._tasks.append(task)
         return
+
+    def list_tasks(self, has_cached_data=False) -> list[str] | list[tuple[str, bool]]:
+        """Returns a list of task names, optionally with whether or not they have cached results."""
+        tasks: list[str] = [t.name for t in self.tasks]
+        if not has_cached_data:
+            return tasks
+
+        r: list[tuple[str, bool]] = []
+        for tname in tasks:
+            r.append((tname, tname in self.cache.keys()))
+        return r
 
     def check_failed_dependencies(self, task: "Task") -> bool:
         """Checks if the Task's dependencies have failed.
@@ -234,7 +246,6 @@ class Pipeline:
         if not skip_tasks:
             skip_tasks = []
         nexec = 0
-        nskip = 0
         nfail = 0
 
         # Validate all tasks have run methods
@@ -247,17 +258,21 @@ class Pipeline:
 
         # Extract tasks from generator
         tasks = list(self.tasks)
+        ntasks = len(tasks)
+
         # TODO: Support execution of only one task, optionally without executing upstream dependencies
         if single_task:
             tasks = [t for t in self.tasks if t.name == single_task]
             # TODO: upstream deps
 
         for task in tasks:
+            # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
+            if task.manual_execution_only is True:
+                continue
             # Handle ignored tasks
             if task.name in skip_tasks and task.name not in force_tasks:
                 self.message.write(task.name, "Skipped (by user)", **msg.WARN)
                 task.is_skipped = True
-                nskip += 1
                 continue
 
             # Try to use cached results
@@ -275,7 +290,6 @@ class Pipeline:
             #         f"{task_log_base} SKIP : Using cached results ({type(task.result).__name__})"
             #     )
             #     task.is_skipped = True
-            #     nskip += 1
             #     continue
 
             # ================================================================
@@ -285,7 +299,6 @@ class Pipeline:
                 # Handle if upstream tasks (dependencies) failed
                 if self.check_failed_dependencies(task):  # Raises or returns bool
                     task.is_skipped = True
-                    nskip += 1
                     #self.message.write(task.name, "Task ...?", **msg.WARN)
                     continue
 
@@ -302,16 +315,18 @@ class Pipeline:
 
         # ====================================================================
         # Post Execution
-        nskip += len([t for t in tasks if t.is_skipped is True])
+        nskip = len([t for t in tasks if t.is_skipped is True])
+        # TODO: change nexec to be the same?
+        nexec = nexec - nskip
 
         self.message.console.rule()
         _time = util.time_diff(_start, perf_counter_ns())
-        self.message.write("Pipeline Completed", f"Ran {nexec}/{len(tasks)} tasks in {_time}", **msg.PIPELINE_COMPLETE)
+        self.message.write("Pipeline Completed", f"Ran {nexec}/{ntasks} tasks in {_time}", **msg.PIPELINE_COMPLETE)
 
         if nskip > 0:
-            self.message.write(msg=f"Skipped: {nskip} tasks", **msg.WARN)
+            self.message.write(msg=f"Skipped: {nskip}/{ntasks} tasks", **msg.WARN)
         if nfail > 0:
-            self.message.write(msg=f"Failed: {nfail} tasks", **msg.FAIL)
+            self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
         self.message.console.rule()
 
         # Clean up - Handle on-complete expirations
