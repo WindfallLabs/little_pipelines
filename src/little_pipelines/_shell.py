@@ -303,12 +303,14 @@ class Shell(Cmd):
         # Single task
         else:
             task_name = inputs[0]
+            task = self.pipeline.get_task(task_name)
             if task_name not in self.pipeline.list_tasks():
                 raise KeyError(f"No such task: '{task_name}'")
             kwargs = self._clean_kwargs(inputs)
             if force:
                 self.pipeline.cache.delete(task_name)
-            self._executeone(task_name, **kwargs)
+            #self._executeone(task_name, **kwargs)
+            task.run(**kwargs)
         return
 
     #@app_logger.catch
