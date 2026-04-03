@@ -13,7 +13,8 @@ from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _messages as msg
 from . import _autodoc, util
-from .cache import Cache, CachedResult, default_cache
+#from .cache import Cache, CachedResult, default_cache
+from .caching import Cache, CacheResult, default_cache
 from ._exceptions import DependencyFailure
 from ._hashing import hash_file, hash_files
 
@@ -105,12 +106,6 @@ class Task:
         """Task name"""
         return self._name
 
-    @cached_property
-    def info(self) -> str:
-        _info = self._g.get('__doc__')
-        _info += _autodoc(self)
-        return _info
-
     @property
     def is_executed(self) -> bool:
         return self._executed
@@ -172,7 +167,7 @@ class Task:
 
     @property
     def result(self) -> Any:
-        return self.cache.get(self.name).value
+        return self.cache.get(self.name).data
 
     @property
     def _script_hash(self):
@@ -189,10 +184,16 @@ class Task:
                 h = hash_files(inp)
         return h
 
+    def get_info(self) -> tuple[str, str]:
+        """
+        Returns the task definition's (script) docstring and auto-documented function info.
+        """
+        return (self._g.get("__doc__"), _autodoc(self))
+
     def get_task_result(self, task_name: str):
         """Allow tasks to access other task results."""
         try:
-            return self.cache.get(task_name).value
+            return self.cache.get(task_name).data
         except Exception as e:
             pass
         return self.pipeline.get_result(task_name)
@@ -230,16 +231,15 @@ class Task:
                 # Check if cached data
                 if self._do_cache_results:
                     with self.message.console.status(f"{self.name}: Checking cache..."):
-                        try:
+                        if self.name in self.cache.keys():
+                        #try:
                             # Attempt to get previously cached results
-                            result_obj = self.cache.get(self.name)
-                            # Cached data is not expired (implicit else keeps cached_result as None)
-                            #is_expired: bool = self.result_expiry is not None and result_obj.cdate < self.result_expiry
-                            #if not is_expired:
-                            cached_result = result_obj.value
+                            result_obj: CacheResult = self.cache.get(self.name)
+                            # TODO: a cache_load_callback
+                            cached_result = result_obj.data
                             has_cached_result = cached_result is not None
-                        except KeyError:
-                            pass
+                        #except KeyError:
+                        #    pass
                     if has_cached_result:
                         self.message.write(self.name, "Loaded cached result", **msg.WARN)
                         self.is_skipped = True

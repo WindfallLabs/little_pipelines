@@ -1,8 +1,9 @@
-"""Pipeline execution with checkpointing."""
+"""
+Pipeline
+"""
 
 # BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
 
-#from functools import cached_property
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
@@ -11,7 +12,7 @@ from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
 from . import util
-from .cache import Cache, CachedResult, default_cache
+from .caching import Cache, CacheResult  # default_cache
 from ._exceptions import DependencyFailure, PipelineValidationError
 #from ._logger import app_logger
 
@@ -46,7 +47,8 @@ class Pipeline:
         self.failures: set = set()
 
         # Cache
-        self.cache: Cache = default_cache if cache is None else cache
+        #self.cache: Cache = default_cache if cache is None else cache
+        self.cache: Optional[Cache] = cache if cache else None
         #self.logger: _Logger = build_logger(name)
         #self._log_dir: Optional[Path] = None
 
@@ -133,17 +135,19 @@ class Pipeline:
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
         return task_lookup[task_name]  # TODO: We want this to error if need be
 
-    def get_result(self, task_name: str) -> Any:
+    def get_result(self, task_name: str, details=False) -> Any:
         """
         Gets a Task's result from the cache.
         Raises KeyError if result or task doesn't exist.
         """
         # Return cached data if exists
-        #if task_name in self.cache.keys():
         try:
-            result: CachedResult | None = self.cache.get(task_name)
-            if result:  # TODO: and not result.is_expired()
-                return result.value
+            result: CacheResult | None = self.cache.get(task_name)
+            if details:
+                return result
+            #if result:  # TODO: and not result.is_expired()
+            #    return result.data
+            return result.data
         except KeyError:
             pass  # Continue to next try-block
 

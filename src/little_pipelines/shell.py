@@ -8,6 +8,7 @@ from getpass import getuser
 from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
+from rich.markdown import Markdown
 
 from . import _messages as msg, _autodoc
 
@@ -192,13 +193,43 @@ class Shell(Cmd):
         return
     
     def do_info(self, inp: str):
-        """Print the docstring of the given Task."""
+        """
+        Print the documentation of the given Task.
+        
+        Args:
+            task_name: str
+            --no-markdown: Flag to print docstring as plaintext
+            --docstring: Flag to only print the script's docstring
+            --funcs: Flag to only print the Task's process documentation
+
+        """
+        inp = inp.strip()
         try:
-            task_name = inp.strip()
+            task_name = inp.split()[0]
             task = self.pipeline.get_task(task_name)
-        except ValueError:  # Can't split input
-            raise 
-        self.console.print(f"[yellow]{task.info}[/]")
+        except IndexError:
+            self.message.write(msg="`info` requires a task name", **msg.SHELL_FAIL)
+            return
+        except KeyError:
+            self.message.write(msg=f"No such task '{task_name}'", **msg.SHELL_FAIL)
+            return
+
+        docstring, autodoc = task.get_info()
+        # Print script docstring
+        self.console.print()  # Empty line
+        if "--funcs" not in inp:
+            if "--no-markdown" not in inp:
+                self.console.print(Markdown(docstring))
+            else:
+                self.console.print(docstring.strip())
+            self.console.print("\n")  # Two empty lines
+
+        if "--docstring" not in inp:
+            self.console.print(Markdown("__Auto-documented function docs__"))
+            self.console.print()  # Empty line
+            self.console.print(autodoc)
+            self.console.print()  # Empty line
+        # End with the path of the task definition
         self.console.print(f"[bright_black]{task._script_path}[/]")
         return
 
@@ -253,13 +284,13 @@ class Shell(Cmd):
                 # Ignore expiries set to "never"
                 if not _result.keep_cached:
                     with self.message.console.status(f"Clearing cached result for {task_name}..."):
-                        self.pipeline.cache.delete(task_name)
+                        self.pipeline.cache.clear(task_name)
                     c += 1
             self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
             return
         else:
             self.message.write(msg=f"Clearing cached data for {task_name}...", **msg.SHELL)
-            self.pipeline.cache.delete(task_name)
+            self.pipeline.cache.clear(task_name)
         return
 
 

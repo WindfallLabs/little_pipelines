@@ -138,6 +138,31 @@ class CacheBase(ABC):
         return decorator
 '''
 
+class CacheTypeRule:
+    def __init__(self, target_type: type, rule_name: str, writer: Callable, cache_ref: "Cache"):
+        self.target_type = target_type
+        self.rule_name = rule_name
+        self._writer = writer
+        self._reader: Optional[Callable] = None
+        self._cache_ref = cache_ref
+
+    def read(self, reader: Callable) -> "CacheTypeRule":
+        self._reader = reader
+        # Atomic registration — only happens when the rule is complete
+        self._cache_ref._type_rules[self.rule_name] = self
+        self._cache_ref._type_dispatch[self.target_type] = self.rule_name
+        return self
+
+    def serialize(self, value: Any) -> bytes:
+        intermediate = self._writer(value)
+        return pickle.dumps(intermediate)
+
+    def deserialize(self, raw: bytes) -> Any:
+        if self._reader is None:
+            raise RuntimeError(f"Rule '{self.rule_name}' has no reader registered.")
+        return self._reader(pickle.loads(raw))
+
+
 class Cache(CacheBase):
     def __init__(self, cache_dir: Path|str, cache_name: str):
         self.cache_dir: Path = Path(cache_dir)
@@ -146,6 +171,22 @@ class Cache(CacheBase):
         # Calculated / set later
         self.db = None
         self.cache_file: Path = Path(cache_dir) / (cache_name + (".db" if not cache_name.endswith(".db") else ""))
+        
+        # Caching rules by type
+        #self._type_rules: dict[str, CacheTypeRule] = {}  # rule_name -> rule
+        #self._type_dispatch: dict[type, str] = {}  # type -> rule_name
+
+    # def cache_type_rule(self, target_type: type, rule_name: str) -> Callable:
+    #     def decorator(writer: Callable) -> CacheTypeRule:
+    #         return CacheTypeRule(target_type, rule_name, writer, cache_ref=self)
+    #     return decorator
+
+    # def _rule_for(self, target_type: type) -> Optional[CacheTypeRule]:
+    #     for cls in target_type.__mro__:
+    #         name = self._type_dispatch.get(cls)
+    #         if name is not None:
+    #             return self._type_rules.get(name)
+    #     return None
 
     def __enter__(self) -> "Cache":
         self.open()
@@ -242,7 +283,7 @@ default_cache = Cache(
     util.DEFAULT_CACHE_FILE.name,
 )
 
-
+'''
 class DictCache(CacheBase):
     """A cache object that uses a temporary in-memory dict for storage."""
     def __init__(self, *args, **kwargs):
@@ -276,7 +317,7 @@ class DictCache(CacheBase):
 
     def clear(self, *args, **kwargs) -> None:
         return None
-
+'''
 '''
 class NullCache(CacheBase):
     """An object that looks and acts like a Cache but does nothing."""
