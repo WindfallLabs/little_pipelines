@@ -12,12 +12,11 @@ from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
 from . import util
-from .caching import Cache, CacheResult  # default_cache
+#from .caching import Cache, CacheResult
 from ._exceptions import DependencyFailure, PipelineValidationError
 #from ._logger import app_logger
 
 if TYPE_CHECKING:
-    #from diskcache import Cache
     from ._tasks import Task
 
 
@@ -30,7 +29,7 @@ class Pipeline:
         self,
         name: str,
         expire_results_if_none: bool = True,
-        cache: Optional[Cache] = None,
+        #cache: Optional[Cache] = None,
     ):
         """
         Initialize a pipeline.
@@ -41,14 +40,14 @@ class Pipeline:
         """
         self.name = name
         self.expire_results_if_none = expire_results_if_none
-        self.cache = cache  # TODO: more
+        #self.cache = cache  # TODO: more
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
 
         # Cache
         #self.cache: Cache = default_cache if cache is None else cache
-        self.cache: Optional[Cache] = cache if cache else None
+        #self.cache: Optional[Cache] = cache if cache else None
         #self.logger: _Logger = build_logger(name)
         #self._log_dir: Optional[Path] = None
 
@@ -103,16 +102,16 @@ class Pipeline:
             self._tasks.append(task)
         return
 
-    def list_tasks(self, has_cached_data=False) -> list[str] | list[tuple[str, bool]]:
+    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool]]:
         """Returns a list of task names, optionally with whether or not they have cached results."""
         tasks: list[str] = [t.name for t in self.tasks]
-        if not has_cached_data:
+        if not show_has_cached_data:
             return tasks
 
-        r: list[tuple[str, bool]] = []
-        for tname in tasks:
-            r.append((tname, tname in self.cache.keys()))
-        return r
+        task_list: list[tuple[str, bool]] = []
+        for t in self.tasks:
+            task_list.append((t.name, t.name in t.cache.keys()))
+        return task_list
 
     def check_failed_dependencies(self, task: "Task") -> bool:
         """Checks if the Task's dependencies have failed.
@@ -135,31 +134,31 @@ class Pipeline:
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
         return task_lookup[task_name]  # TODO: We want this to error if need be
 
-    def get_result(self, task_name: str, details=False) -> Any:
-        """
-        Gets a Task's result from the cache.
-        Raises KeyError if result or task doesn't exist.
-        """
-        # Return cached data if exists
-        try:
-            result: CacheResult | None = self.cache.get(task_name)
-            if details:
-                return result
-            #if result:  # TODO: and not result.is_expired()
-            #    return result.data
-            return result.data
-        except KeyError:
-            pass  # Continue to next try-block
+    # def get_result(self, task_name: str, details=False) -> Any:
+    #     """
+    #     Gets a Task's result from the cache.
+    #     Raises KeyError if result or task doesn't exist.
+    #     """
+    #     # Return cached data if exists
+    #     try:
+    #         result: CacheResult | None = self.cache.get(task_name)
+    #         if details:
+    #             return result
+    #         #if result:  # TODO: and not result.is_expired()
+    #         #    return result.data
+    #         return result.data
+    #     except KeyError:
+    #         pass  # Continue to next try-block
 
-        # Run the task and return the result
-        try:
-            task: "Task" = self.get_task(task_name)
-            r = task.run()
-            return r
-        except KeyError:
-            raise KeyError(f"No such task: '{task_name}'")
-        except AttributeError:
-            raise AttributeError("Task is not associated with a Pipeline")
+    #     # Run the task and return the result
+    #     try:
+    #         task: "Task" = self.get_task(task_name)
+    #         result: Any = task.run()
+    #         return result
+    #     except KeyError:
+    #         raise KeyError(f"No such task: '{task_name}'")
+    #     except AttributeError:
+    #         raise AttributeError("Task is not associated with a Pipeline")
 
     def reload_tasks(self, task_name: Optional[str] = ""):
         """Reloads task source code to apply any changes to task source code to the pipeline."""
@@ -255,11 +254,6 @@ class Pipeline:
         # Validate all tasks have run methods
         self.validate_tasks()
 
-        # Force - clears all results from cache
-        if force_all:
-            self.message.write("Pipeline", "Clearing cache...", **msg.WARN)
-            self.cache.clear()
-
         # Extract tasks from generator
         tasks = list(self.tasks)
         ntasks = len(tasks)
@@ -273,28 +267,13 @@ class Pipeline:
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
                 continue
+            if force_all or task.name in force_tasks:
+                task.cache.clear(task.name)
             # Handle ignored tasks
             if task.name in skip_tasks and task.name not in force_tasks:
                 self.message.write(task.name, "Skipped (by user)", **msg.WARN)
                 task.is_skipped = True
                 continue
-
-            # Try to use cached results
-            # cached_hashes = self.cache.get(task.name + "_hashes", default=dict())
-            # has_same_script = (cached_hashes.get("script") == task._script_hash)
-            # has_same_inputs = (cached_hashes.get("inputs") == task._inputs_hash)
-            # task.logger.debug(
-            #     f"{task.name} Script/Inputs Changed: {not has_same_script}/{not has_same_inputs}"
-            # )
-            # # Will be None if force=True
-            # cached_results = self.cache.get(task.name)
-
-            # if (cached_results is not None and has_same_inputs and has_same_script):
-            #     task.logger.warning(
-            #         f"{task_log_base} SKIP : Using cached results ({type(task.result).__name__})"
-            #     )
-            #     task.is_skipped = True
-            #     continue
 
             # ================================================================
             # Execute task
@@ -307,7 +286,7 @@ class Pipeline:
                     continue
 
                 # Execute
-                result = task.run()
+                result: Any = task.run()
                 if result is None:
                     self.message.write(task.name, "Result is None", **msg.WARN)
                 nexec += 1
@@ -315,6 +294,7 @@ class Pipeline:
             except Exception as e:
                 self.failures.add(task.name)
                 self.message.write(task.name, e, **msg.FAIL)
+                # TODO: Log full stack
                 nfail += 1
 
         # ====================================================================
@@ -332,16 +312,6 @@ class Pipeline:
         if nfail > 0:
             self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
         self.message.console.rule()
-
-        # Clean up - Handle on-complete expirations
-        # for key in expire._on_complete_deletions:
-        #     app_logger.info(f"<light-black>Expiring results for {key}</>")
-        #     self.cache.delete(key)
-        # # Clean up - Delete None results
-        # if self.expire_results_if_none:
-        #     for key in self.cache.iterkeys():
-        #         if self.cache[key] is None:
-        #             self.cache.delete(key)
 
         return
 

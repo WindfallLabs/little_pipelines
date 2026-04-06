@@ -4,11 +4,12 @@
 
 import datetime as dt
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 from .result import CacheResult
-from .rules import CacheRule, DefaultRule, StrRule
+from .serialize import CacheSerializer, DefaultSerializer, StrSerializer
 from little_pipelines import util
 
 
@@ -29,6 +30,14 @@ CREATE INDEX IF NOT EXISTS idx_cache_hash ON cache (hash)
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
 
+# @dataclass
+# class TaskRule:
+#     use_cache: bool
+
+
+# cache.task_rules["ViaS10"].use_cache
+
+
 class Cache():
     def __init__(self, path: str|Path):
         """A cache (SQLite database) to store results."""
@@ -37,17 +46,17 @@ class Cache():
             self.path = Path(path)
         
         # Serialization rules
-        self._rules = {}
-        self._rules["default"] = DefaultRule()
-        self._rules[str(str)] = StrRule()
+        self._serializers = {}
+        self._serializers["default"] = DefaultSerializer()  # Pickle
+        self._serializers[str(str)] = StrSerializer()
 
         # Database
         self._conn: Optional[sqlite3.Connection] = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     @property
-    def _default_rule(self):
-        return self._rules["default"]
+    def _default_serializer(self):
+        return self._serializers["default"]
 
     def _open(self) -> None:
         """Open (create if needed) the database."""
@@ -81,22 +90,22 @@ class Cache():
         self._close()
         return
 
-    def rule(self, type_arg: type):
+    def serializer(self, type_arg: type):
         """
-        Decorator to register a CacheRule subclass.
+        Decorator to register a CacheSerializer subclass.
 
         Args:
-            type_arg: Type to associate with the rule.
+            type_arg: Type to associate with the serializer.
 
         Returns:
-            A decorator function that registers the rule class.
+            A decorator function that registers the serializer class.
 
         Example:
             ```
             import sys
 
-            @cache.rule
-            class StrRule(CacheRule):
+            @cache.serializer
+            class StrSerializer(CacheSerializer):
                 def dumps(self, data: str, encoding: Optional[str] = None) -> bytes:
                     '''Defines how strings get written to the cache.'''
                     if not encoding:
@@ -110,17 +119,17 @@ class Cache():
                     return data.decode(encoding)
             ```
         """
-        def decorator(rule_class: type[CacheRule]) -> type[CacheRule]:
+        def decorator(serializer_class: type[CacheSerializer]) -> type[CacheSerializer]:
             # Determine the type key
             if type_arg is not None:
                 type_key = str(type_arg)
             else:
-                raise ValueError("`@Cache().rule(type)` decorator requires a type")
+                raise ValueError("`@Cache().serializer(type)` decorator requires a type")
 
-            # Store an instance of the rule
-            self._rules[type_key] = rule_class()
+            # Store an instance of the serializer
+            self._serializers[type_key] = serializer_class()
 
-            return rule_class
+            return serializer_class
         
         return decorator
 

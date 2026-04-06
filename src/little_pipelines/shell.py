@@ -11,9 +11,11 @@ from rich.console import Console
 from rich.markdown import Markdown
 
 from . import _messages as msg, _autodoc
-
-if TYPE_CHECKING:
-    from ._pipeline import Pipeline
+from .caching import Cache
+from .pipeline import Pipeline
+from .shell_utils import (
+    _handle_dataframe_printing_args,
+)
 
 
 def make_heading(title: str, offset=0, char="#"):
@@ -27,21 +29,19 @@ class Shell(Cmd):
     title = "\nLittle-Pipelines Shell"
     console = Console()
     powered_by = True
-    pipeline: Optional["Pipeline"] = None
+    pipeline: Optional["Pipeline"] = None,
+    cache: Optional[Cache] = None,
     #logger = app_logger
+
+    def __init__(self, pipeline: Pipeline, cache: Cache):
+        super().__init__()
+        self.pipeline = pipeline
+        self.pipeline._shell = f"{self.__class__.__name__} | '{self.title}' | opened by {getuser()}"
+        self.cache = cache
 
     @property
     def message(self):
         return self.pipeline.message
-
-    # ========================================================================
-    # Setup
-
-    def set_pipeline(self, pipeline: "Pipeline"):
-        """Set the pipeline. Call this before `cmdloop`."""
-        self.pipeline = pipeline
-        self.pipeline._shell = f"{self.__class__.__name__} | '{self.title}' | opened by {getuser()}"
-        return self
 
     # ========================================================================
     # Exit and aliases
@@ -170,7 +170,7 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection
 
-    def do_tasks(self, inp: str = ""):
+    def do_tasks(self, inp: str = ""):  # TODO: return a dataframe
         """Lists all Tasks in the Pipeline."""
         self.message.write(msg="Listing registered tasks...", **msg.SHELL)
         task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
@@ -183,15 +183,29 @@ class Shell(Cmd):
         self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
 
-    def do_peek(self, task_name: str):
-        """Preview cached data."""
+    def do_peek(self, inp: str):
+        """
+        Preview cached data.
+        Optionally set row and column count with:
+            --rows=10
+            --columns=10
+        """
+        task_name = inp.split()[0]
         try:
-            r = self.pipeline.cache.get(task_name).value
-            self.console.print(r)
+            result = self.cache.get(task_name).data
         except KeyError as e:
             self.message.write(msg=e, **msg.SHELL_FAIL)
+
+        reset_dataframe_printing = _handle_dataframe_printing_args(inp, result)
+
+        # Print it
+        self.console.print(result)
+
+        # Reset dataframe cols/rows printing
+        if reset_dataframe_printing:
+            reset_dataframe_printing()
         return
-    
+
     def do_info(self, inp: str):
         """
         Print the documentation of the given Task.
@@ -236,12 +250,12 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection - Cache utils
 
-    def _list_cache(self, inp: str = ""):
+    def _list_cache(self, inp: str):
         clist = []
         if inp == "--all":
-            cached_names = self.pipeline.cache.keys()
+            cached_names = self.cache.keys()
         else:
-            cached_names = [i for i in self.pipeline.cache.keys() if not i.endswith("_hashes")]
+            cached_names = [i for i in self.cache.keys() if not i.endswith("_hashes")]
         for k in cached_names:
             clist.append(f"- '{k}'")
         clist.append(f"[bright_black]Total: {len(cached_names)}[/]")
@@ -254,54 +268,42 @@ class Shell(Cmd):
         return
 
     #@app_logger.catch
-    def do_clear_cache(self, task_name: str):
+    def do_clear_cache(self, inp: str):
         """Clear specified Task results from cache, or all data using '.' or '. --all'.
-        
+
         Args:
             task_name: The Task to clear cached data
             --hard: Clears all cached data, even those set to `expire.never`
         """
         # TODO: raise KeyError if not exists
-        task_name = task_name.strip()
-        ncache = len([k for k in self.pipeline.cache.keys() if not k.endswith("_hashes")])
+        task_name = inp.split()[0]
         if not task_name:
             # No input error
             self.message.write(msg="Input required: enter a task name, or use '.'", **msg.SHELL_FAIL)
             return
 
-        if task_name.startswith("."):  # TODO: BUG: the console.status is wonk
-            if "--hard" in task_name:
-                self.message.write(msg="Clearing all cached data...", **msg.SHELL)
-                with self.message.console.status("Clearing all cached data..."):
-                    self.pipeline.cache.clear()
-                self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
-                return
+        ncache = len(self.cache.keys())
 
-            c = 0
-            self.message.write(msg="Clearing cached data...", **msg.SHELL)
-            for task_name in self.pipeline.cache.keys():
-                _result = self.pipeline.cache.get(task_name)
-                # Ignore expiries set to "never"
-                if not _result.keep_cached:
-                    with self.message.console.status(f"Clearing cached result for {task_name}..."):
-                        self.pipeline.cache.clear(task_name)
-                    c += 1
+        if task_name.startswith("."):  # TODO: BUG: the console.status is wonk
+            #if "--hard" in inp:
+            self.message.write(msg="Clearing all cached data...", **msg.SHELL)
+            with self.message.console.status("Clearing all cached data..."):
+                self.cache.clear()
             self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
             return
+        # TODO: add some sort of keep flag?
         else:
             self.message.write(msg=f"Clearing cached data for {task_name}...", **msg.SHELL)
-            self.pipeline.cache.clear(task_name)
+            self.cache.clear(task_name)
         return
-
 
     # ========================================================================
     def do_reload(self, inp: Optional[str] = "") -> None:
         """Reload task definitions from source code (re-import tasks)."""
-        self.pipeline.reload_tasks(inp)
-        try:
-            self.pipeline.cache.delete(inp)
-        except:
-            pass
+        task_name = inp.split()[0]
+        self.pipeline.reload_tasks(task_name)
+        self.cache.clear(task_name)
+        self.message.write(msg=f"Reloaded script: {task_name}", **msg.SHELL)
         return
 
     # ========================================================================
@@ -339,7 +341,7 @@ class Shell(Cmd):
                 raise KeyError(f"No such task: '{task_name}'")
             kwargs = self._clean_kwargs(inputs)
             if force:
-                self.pipeline.cache.delete(task_name)
+                self.cache.delete(task_name)
             #self._executeone(task_name, **kwargs)
             task.run(**kwargs)
         return

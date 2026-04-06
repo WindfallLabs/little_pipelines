@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Optional, TYPE_CHECKING
 
-from .rules import CacheRule
+from .serialize import CacheSerializer
 
 if TYPE_CHECKING:
     from .cache import Cache
@@ -73,8 +73,8 @@ class CacheResult:
         if dtype == "<class 'bytes'>":
             data = raw_data
         else:
-            rule: CacheRule = cache._rules.get(dtype, cache._default_rule)
-            data: Any = rule.loads(raw_data)
+            serializer: CacheSerializer = cache._serializers.get(dtype, cache._default_serializer)
+            data: Any = serializer.loads(raw_data)
 
         result = cls(name, data, dtype, last_updated, hash_)
         return result
@@ -85,8 +85,8 @@ class CacheResult:
         if self.dtype == "<class 'bytes'>":
             data: bytes = self.data
         else:
-            rule: CacheRule = cache._rules.get(self.dtype, cache._default_rule)
-            data: bytes = rule.dumps(self.data)
+            serializer: CacheSerializer = cache._serializers.get(self.dtype, cache._default_serializer)
+            data: bytes = serializer.dumps(self.data)
 
         # Write database rows
         with cache:

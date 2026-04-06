@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 
-class CacheRule(ABC):
+class CacheSerializer(ABC):
     @classmethod
     @abstractmethod
     def dumps(self, data: Any) -> bytes:
@@ -20,7 +20,7 @@ class CacheRule(ABC):
         ...
 
 
-class DefaultRule(CacheRule):
+class DefaultSerializer(CacheSerializer):
     """Defines the default caching (using pickle)."""
     def dumps(self, data: Any) -> bytes:
         """Pickle data."""
@@ -31,7 +31,7 @@ class DefaultRule(CacheRule):
         return pickle.loads(data)
 
 
-class StrRule(CacheRule):
+class StrSerializer(CacheSerializer):
     def dumps(self, data: str, encoding: Optional[str] = None) -> bytes:
         """Defines how strings get written to the cache."""
         if not encoding:

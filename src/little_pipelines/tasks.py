@@ -13,8 +13,7 @@ from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _messages as msg
 from . import _autodoc, util
-#from .cache import Cache, CachedResult, default_cache
-from .caching import Cache, CacheResult, default_cache
+from .caching import Cache, CacheResult  # TODO: rm default_cache
 from ._exceptions import DependencyFailure
 from ._hashing import hash_file, hash_files
 
@@ -48,21 +47,19 @@ class Task:
             name: str,
             dependencies: Optional[list[str]] = None,
             if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
-            input_files: Optional[list[Path | str]] = None,
-            hash_inputs: bool = True,
+            #input_files: Optional[list[Path | str]] = None,
+            #hash_inputs: bool = True,
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
-            cache_results: bool = False,
+            cache_results: bool = True,
             manual_execution_only: bool = False,
         ):
         """
         Initialize a Task.
 
         Args:
-            name: Unique task name
+            name: Unique task name (e.g. MyTask)
             dependencies: List of task names this task depends on
-            execution_type: "AUTO" or "MANUAL" execution
-            use_cache: If True, task results will be cached for resume
             input_files: List of input file paths/patterns for hash tracking
             hash_inputs: If False, use empty string hash (for API/DB inputs)
             cache: Uses Pipeline's cache, default cache, or user-provided cache
@@ -82,19 +79,18 @@ class Task:
         # Inspection
         # TODO: make method?
         self._g = currentframe().f_back.f_globals
-        # Get the docstring for the instance's script
-        #self.info = _g.get('__doc__')
         # Get the filepath of the instance's script
         self._script_path = self._g.get('__file__')
 
         # Hashing
-        self.input_files = input_files  # TODO: ??
-        self.hash_inputs = hash_inputs  # TODO: ??
+        #self.input_files = input_files  # TODO: ??
+        #self.hash_inputs = hash_inputs  # TODO: ??
 
         # Pipeline
         self._pipeline: Optional["Pipeline"] = None
         # Initialize a pipeline-independent cache
-        self._cache: Cache = default_cache if cache is None else cache
+        #self._cache: Cache = default_cache if cache is None else cache
+        self.cache: Cache = cache
         self._do_cache_results = cache_results
         self.result_expiry = result_expiry  # NOTE: None
 
@@ -131,7 +127,7 @@ class Task:
             return self.pipeline.message
         return msg.Message(len(self.name))
 
-    @property
+    @cached_property
     def dependencies(self) -> dict[str, Self] | None:
         """Up-stream tasks this task depends on."""
         if self.pipeline is not None:
@@ -151,12 +147,12 @@ class Task:
         # TODO: consider logging
         return
 
-    @property
-    def cache(self):
-        """Return whatever cache is associated with the task."""
-        if self._pipeline:
-            return self.pipeline.cache
-        return self._cache
+    # @property
+    # def cache(self):
+    #     """Return whatever cache is associated with the task."""
+    #     if self._pipeline:
+    #         return self.pipeline.cache
+    #     return self._cache
 
     # @property
     # def logger(self):
@@ -167,6 +163,7 @@ class Task:
 
     @property
     def result(self) -> Any:
+        """Accessor for the Task's result(s)."""
         return self.cache.get(self.name).data
 
     @property
@@ -176,13 +173,13 @@ class Task:
         except:
             return ""
 
-    @property
-    def _inputs_hash(self):
-        h = ""
-        if self.input_files and self.hash_inputs:
-            for inp in self.input_files:
-                h = hash_files(inp)
-        return h
+    # @property
+    # def _inputs_hash(self):
+    #     h = ""
+    #     if self.input_files and self.hash_inputs:
+    #         for inp in self.input_files:
+    #             h = hash_files(inp)
+    #     return h
 
     def get_info(self) -> tuple[str, str]:
         """
@@ -190,13 +187,19 @@ class Task:
         """
         return (self._g.get("__doc__"), _autodoc(self))
 
-    def get_task_result(self, task_name: str):
-        """Allow tasks to access other task results."""
-        try:
+    def get_dependency_result(self, task_name: str, check_dependency=True):
+        """
+        Allows a Task to access another Task's results.
+        
+        Args:
+            task_name (str): The name of the Task data to retrieve
+            check_dependency (bool): A safety measure to ensure the retrieved data is a dependency
+                i.e. The data exists before the calling Task
+        """
+        # Ensure the accessed task is a dependency
+        if task_name in self.dependencies.keys() or check_dependency is False:
             return self.cache.get(task_name).data
-        except Exception as e:
-            pass
-        return self.pipeline.get_result(task_name)
+        raise KeyError(f"{task_name} is not a dependency of {self.name}")
 
     # ========================================================================
     # Decorators
@@ -229,13 +232,15 @@ class Task:
                 # ------------------------------------------------------
                 # TODO: should we do this here or at the pipeline-level?
                 # Check if cached data
-                if self._do_cache_results:
+                if self.cache is None:
+                    self.message.write(self.name, "No Cache set", **msg.WARN)
+                if self.cache is not None and self._do_cache_results:
                     with self.message.console.status(f"{self.name}: Checking cache..."):
-                        if self.name in self.cache.keys():
                         #try:
+                        if self.name in self.cache.keys():
                             # Attempt to get previously cached results
                             result_obj: CacheResult = self.cache.get(self.name)
-                            # TODO: a cache_load_callback
+                            # TODO: a cache_load_callback?
                             cached_result = result_obj.data
                             has_cached_result = cached_result is not None
                         #except KeyError:
@@ -262,8 +267,8 @@ class Task:
             # ----------------------------------------------------------------
             # Post-function call
             # ----------------------------------------------------------------
-            # Cache results, if not already cached
-            if func_name == "run" and not has_cached_result:  # Don't re-cache
+            # Cache results, if not already cached and if a cache was set
+            if func_name == "run" and self.cache is not None and not has_cached_result:  # Don't re-cache
                 try:
                     with self.message.console.status(f"{self.name}: Caching result..."):
                         self.cache.set(self.name, result)  # TODO: expiry=self.result_expiry ??
