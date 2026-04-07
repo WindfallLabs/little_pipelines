@@ -110,7 +110,10 @@ class Pipeline:
 
         task_list: list[tuple[str, bool]] = []
         for t in self.tasks:
-            task_list.append((t.name, t.name in t.cache.keys()))
+            try:
+                task_list.append((t.name, t.name in t.cache.keys()))
+            except AttributeError:  # Task has no cache attr set
+                task_list.append((t.name, False))
         return task_list
 
     def check_failed_dependencies(self, task: "Task") -> bool:

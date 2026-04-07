@@ -19,23 +19,11 @@ CREATE TABLE IF NOT EXISTS cache (
     data BLOB,
     dtype TEXT NOT NULL,
     last_updated TEXT NOT NULL,
-    hash TEXT
+    extra TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cache_last_updated ON cache (last_updated)
     WHERE last_updated IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_cache_hash ON cache (hash)
-    WHERE hash IS NOT NULL;
 """
-
-_DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
-
-
-# @dataclass
-# class TaskRule:
-#     use_cache: bool
-
-
-# cache.task_rules["ViaS10"].use_cache
 
 
 class Cache():
@@ -65,7 +53,6 @@ class Cache():
             detect_types=sqlite3.PARSE_DECLTYPES,
             check_same_thread=False,
         )
-        #self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_DDL)
         self._conn.commit()
         return
@@ -144,7 +131,6 @@ class Cache():
         # Get from database
         if name in self.keys():
             result: CacheResult = CacheResult.read(name, self)
-            result.last_updated = dt.datetime.strptime(result.last_updated, _DATETIME_FMT)
             return result
         raise KeyError(f"{name} not found in cache")
 
@@ -152,13 +138,13 @@ class Cache():
         self,
         name: str,
         data: Any,
-        hash_: Optional[str] = None
+        extra: Optional[dataclass] = None,
     ) -> None:
         """Caches data and metadata to SQLite."""
-        last_updated = dt.datetime.now().strftime(_DATETIME_FMT)
-        dtype = str(type(data))
+        last_updated: dt.datetime = dt.datetime.now()
+        dtype: str = str(type(data))
         # Write to the database
-        _ = CacheResult(name, data, dtype, last_updated, hash_).write(self)
+        _ = CacheResult(name, data, dtype, last_updated, extra).write(self)
         return
 
     def clear(self, name: Optional[str] = None):

@@ -1,5 +1,6 @@
 #from . import cache
 from . import caching
+from .caching import CacheResult
 from . import expire
 from ._autodoc import _autodoc
 from ._exceptions import *

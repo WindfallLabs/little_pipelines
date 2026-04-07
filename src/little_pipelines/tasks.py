@@ -47,8 +47,6 @@ class Task:
             name: str,
             dependencies: Optional[list[str]] = None,
             if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
-            #input_files: Optional[list[Path | str]] = None,
-            #hash_inputs: bool = True,
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
             cache_results: bool = True,
@@ -76,26 +74,31 @@ class Task:
         self._executed = False
         self._skipped = False
 
+        # Overridables
+        self._cache_read_callback = self._default_cache_read_callback
+
         # Inspection
         # TODO: make method?
         self._g = currentframe().f_back.f_globals
         # Get the filepath of the instance's script
         self._script_path = self._g.get('__file__')
 
-        # Hashing
-        #self.input_files = input_files  # TODO: ??
-        #self.hash_inputs = hash_inputs  # TODO: ??
-
         # Pipeline
         self._pipeline: Optional["Pipeline"] = None
-        # Initialize a pipeline-independent cache
-        #self._cache: Cache = default_cache if cache is None else cache
+        # Initialize the cache stuff ....
         self.cache: Cache = cache
-        self._do_cache_results = cache_results
+        self._use_cached_results = cache_results
         self.result_expiry = result_expiry  # NOTE: None
 
     # ========================================================================
     # Properties
+
+    @property
+    def _script_hash(self):
+        try:
+            return hash_file(self._script_path)
+        except:
+            return ""
 
     @property
     def name(self) -> str:
@@ -148,38 +151,36 @@ class Task:
         return
 
     # @property
-    # def cache(self):
-    #     """Return whatever cache is associated with the task."""
-    #     if self._pipeline:
-    #         return self.pipeline.cache
-    #     return self._cache
-
-    # @property
     # def logger(self):
     #     """Return whatever logger is associated with the task."""
     #     if self._pipeline:
     #         return self.pipeline.logger
     #     return self._logger
 
-    @property
+    @property  # TODO: remove??
     def result(self) -> Any:
         """Accessor for the Task's result(s)."""
         return self.cache.get(self.name).data
 
-    @property
-    def _script_hash(self):
-        try:
-            return hash_file(self._script_path)
-        except:
-            return ""
+    def get_result(self, details=False) -> Any|CacheResult:
+        """Accessor for the Task's result(s)."""
+        r: CacheResult = self.cache.get(self.name)
+        if details:
+            return r
+        return r.data
 
-    # @property
-    # def _inputs_hash(self):
-    #     h = ""
-    #     if self.input_files and self.hash_inputs:
-    #         for inp in self.input_files:
-    #             h = hash_files(inp)
-    #     return h
+    def _default_cache_read_callback(self, cached_result: CacheResult) -> Any:
+        """The default cache-read callback."""
+        return cached_result.data
+
+    def on_cache_read(self, func: Callable):
+        """Decorator used to override the cache-read callback."""
+        from types import MethodType
+        self._cache_read_callback = MethodType(func, self)
+        return func
+
+    def cache_read_callback(self, cached_result: CacheResult):
+        return self._cache_read_callback(cached_result)
 
     def get_info(self) -> tuple[str, str]:
         """
@@ -219,35 +220,28 @@ class Task:
             # Get the wrapped function's name
             func_name: str = func.__name__
 
-            # Is associated with a pipeline
-            has_pipeline = self.pipeline is not None
-
             # Set cache-related vars
-            cached_result = None
-            has_cached_result = False
+            cached_result: Any|None = None
 
-            if func_name == "run" and has_pipeline:
+            if func_name == "run":  #  and has_pipeline
                 # Print task-start message
                 self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
                 # ------------------------------------------------------
-                # TODO: should we do this here or at the pipeline-level?
                 # Check if cached data
-                if self.cache is None:
-                    self.message.write(self.name, "No Cache set", **msg.WARN)
-                if self.cache is not None and self._do_cache_results:
+                if self.cache is not None and self.name in self.cache.keys():
                     with self.message.console.status(f"{self.name}: Checking cache..."):
-                        #try:
-                        if self.name in self.cache.keys():
-                            # Attempt to get previously cached results
-                            result_obj: CacheResult = self.cache.get(self.name)
-                            # TODO: a cache_load_callback?
-                            cached_result = result_obj.data
-                            has_cached_result = cached_result is not None
-                        #except KeyError:
-                        #    pass
-                    if has_cached_result:
-                        self.message.write(self.name, "Loaded cached result", **msg.WARN)
+                        # Attempt to get previously cached results
+                        result_obj: CacheResult = self.cache.get(self.name)
+                    cached_result: Any|None = self.cache_read_callback(result_obj)
+                    if cached_result is not None:
+                        self.message.write(
+                            self.name,
+                            f"Loaded cached result ({type(cached_result).__name__})",
+                            **msg.WARN
+                        )
                         self.is_skipped = True
+                elif self.cache is None:
+                    self.message.write(self.name, "No Cache set", **msg.WARN)
             else:
                 # Print process-start message for each non-"run" function
                 self.message.write(self.name, f"Running {func_name}...", **msg.PROCESS_START)
@@ -256,7 +250,7 @@ class Task:
             # Wrapped function call
             # ----------------------------------------------------------------
             if func_name == "run":
-                if has_cached_result:
+                if cached_result is not None:
                     result = cached_result
                 else:
                     result = func(self, *args, **kwargs)
@@ -268,10 +262,14 @@ class Task:
             # Post-function call
             # ----------------------------------------------------------------
             # Cache results, if not already cached and if a cache was set
-            if func_name == "run" and self.cache is not None and not has_cached_result:  # Don't re-cache
+            if func_name == "run" and cached_result is None:  # Don't re-cache
                 try:
                     with self.message.console.status(f"{self.name}: Caching result..."):
-                        self.cache.set(self.name, result)  # TODO: expiry=self.result_expiry ??
+                        # Process extras
+                        extra = None
+                        if hasattr(self, "extra"):
+                            extra = self.extra
+                        self.cache.set(self.name, result, extra)
                 except Exception as e:
                     self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
                     self.message.write(msg=e, **msg.FAIL)
