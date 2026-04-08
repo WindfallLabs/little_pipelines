@@ -102,7 +102,7 @@ class Pipeline:
             self._tasks.append(task)
         return
 
-    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool]]:
+    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool, str]]:
         """Returns a list of task names, optionally with whether or not they have cached results."""
         tasks: list[str] = [t.name for t in self.tasks]
         if not show_has_cached_data:
@@ -111,9 +111,11 @@ class Pipeline:
         task_list: list[tuple[str, bool]] = []
         for t in self.tasks:
             try:
-                task_list.append((t.name, t.name in t.cache.keys()))
-            except AttributeError:  # Task has no cache attr set
-                task_list.append((t.name, False))
+                result = t.get_result(True)
+                last_updated = result.last_updated.strftime("%Y-%m-%d")
+                task_list.append((t.name, True, last_updated))
+            except (AttributeError, ValueError):  # Task has no cache attr set
+                task_list.append((t.name, False, "Unknown"))
         return task_list
 
     def check_failed_dependencies(self, task: "Task") -> bool:

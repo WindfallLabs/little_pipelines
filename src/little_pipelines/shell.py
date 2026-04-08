@@ -176,9 +176,10 @@ class Shell(Cmd):
         task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
         # TODO: check expiry or value is None
         c = len(task_list)
-        for tname, has_cache in task_list:
+        for tname, has_cache, last_update in task_list:
             self.console.print(
-                f"- {tname} ([green]cached[/])" if has_cache else f"- {tname} ([yellow]not cached[/])"
+                f"- {tname} ([green]cached[/], [bright_black]{last_update}[/])" if has_cache
+                else f"- {tname} ([yellow]not cached[/])"
             )
         self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
@@ -341,7 +342,7 @@ class Shell(Cmd):
                 raise KeyError(f"No such task: '{task_name}'")
             kwargs = self._clean_kwargs(inputs)
             if force:
-                self.cache.delete(task_name)
+                self.cache.clear(task_name)
             #self._executeone(task_name, **kwargs)
             task.run(**kwargs)
         return
