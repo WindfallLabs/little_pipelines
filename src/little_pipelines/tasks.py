@@ -49,7 +49,8 @@ class Task:
             if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
-            cache_results: bool = True,
+            #cache_results: bool = True,
+            use_cached_data: bool = True,
             manual_execution_only: bool = False,
         ):
         """
@@ -87,7 +88,8 @@ class Task:
         self._pipeline: Optional["Pipeline"] = None
         # Initialize the cache stuff ....
         self.cache: Cache = cache
-        self._use_cached_results = cache_results
+        #self._use_cached_results = cache_results
+        self._use_cached_results = use_cached_data
         self.result_expiry = result_expiry  # NOTE: None
 
     # ========================================================================
@@ -130,7 +132,7 @@ class Task:
             return self.pipeline.message
         return msg.Message(len(self.name))
 
-    @cached_property
+    @property
     def dependencies(self) -> dict[str, Self] | None:
         """Up-stream tasks this task depends on."""
         if self.pipeline is not None:
@@ -228,7 +230,7 @@ class Task:
                 self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
                 # ------------------------------------------------------
                 # Check if cached data
-                if self.cache is not None and self.name in self.cache.keys():
+                if self._use_cached_results and self.cache is not None and self.name in self.cache.keys():
                     with self.message.console.status(f"{self.name}: Checking cache..."):
                         # Attempt to get previously cached results
                         result_obj: CacheResult = self.cache.get(self.name)
@@ -280,8 +282,13 @@ class Task:
             self._process_times.append((func_name, _time))
 
             if func_name == "run":
-                self._executed = True
-                self.message.write(self.name, _time_msg, **msg.TASK_COMPLETE)
+                if cached_result is not None:
+                    # Print "DONE" in grey if cached data was used
+                    self.message.write(self.name, _time_msg, **msg.PROCESS_COMPLETE)
+                else:
+                    # Print "DONE" in green
+                    self._executed = True
+                    self.message.write(self.name, _time_msg, **msg.TASK_COMPLETE)
             else:
                 self.message.write(self.name, _time_msg, **msg.PROCESS_COMPLETE)
             return result

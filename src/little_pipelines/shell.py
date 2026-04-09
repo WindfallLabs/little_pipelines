@@ -184,7 +184,7 @@ class Shell(Cmd):
         self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
 
-    def do_peek(self, inp: str):
+    def do_peek(self, inp: str):  # TODO: add a --details flag
         """
         Preview cached data.
         Optionally set row and column count with:
@@ -196,6 +196,7 @@ class Shell(Cmd):
             result = self.cache.get(task_name).data
         except KeyError as e:
             self.message.write(msg=e, **msg.SHELL_FAIL)
+            return
 
         reset_dataframe_printing = _handle_dataframe_printing_args(inp, result)
 
