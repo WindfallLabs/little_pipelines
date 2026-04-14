@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
+from warnings import warn
 
 from . import _messages as msg
 from . import _autodoc, util
@@ -65,7 +66,7 @@ class Task:
             cache_results: Allow the task to save its results to the cache
         """
         self._name: str = name
-        self._dependency_names: list[str] = dependencies if dependencies else list()
+        self._dependency_names: set[str] = dependencies if dependencies else set()
         self.if_upstream_errors = if_upstream_errors
 
         # Flags for pipeline
@@ -139,7 +140,8 @@ class Task:
             return {
                 name: self.pipeline.get_task(name) for name in self._dependency_names
             }
-        return None
+        warn("Task is not associated with a Pipeline")
+        return dict()
 
     @property
     def pipeline(self):
@@ -192,16 +194,22 @@ class Task:
 
     def get_dependency_result(self, task_name: str, check_dependency=True):
         """
-        Allows a Task to access another Task's results.
+        Gets another Task's cached result(s).
         
         Args:
-            task_name (str): The name of the Task data to retrieve
+            task_name (str): The name of the Task's data to retrieve
             check_dependency (bool): A safety measure to ensure the retrieved data is a dependency
                 i.e. The data exists before the calling Task
         """
         # Ensure the accessed task is a dependency
-        if task_name in self.dependencies.keys() or check_dependency is False:
-            return self.cache.get(task_name).data
+        if task_name in self._dependency_names or check_dependency is False:
+            if self.cache is not None:
+                try:
+                    return self.cache.get(task_name).data
+                except KeyError as e:
+                    raise e  # TODO: execute dependency?
+            else:
+                raise AttributeError(f"{self.name} task has no cache set")
         raise KeyError(f"{task_name} is not a dependency of {self.name}")
 
     # ========================================================================

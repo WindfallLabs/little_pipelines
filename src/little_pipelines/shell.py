@@ -171,9 +171,16 @@ class Shell(Cmd):
     # Inspection
 
     def do_tasks(self, inp: str = ""):  # TODO: return a dataframe
-        """Lists all Tasks in the Pipeline."""
+        """
+        Lists all Tasks in the Pipeline.
+        
+        --sorted - Sorts tasks alphabetically
+        """
         self.message.write(msg="Listing registered tasks...", **msg.SHELL)
-        task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
+        with self.console.status("Loading..."):
+            task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
+        if "--sort" in inp:
+            task_list.sort(key=lambda x: x[0])
         # TODO: check expiry or value is None
         c = len(task_list)
         for tname, has_cache, last_update in task_list:
