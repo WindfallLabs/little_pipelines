@@ -183,11 +183,16 @@ class Shell(Cmd):
             task_list.sort(key=lambda x: x[0])
         # TODO: check expiry or value is None
         c = len(task_list)
-        for tname, has_cache, last_update in task_list:
-            self.console.print(
-                f"- {tname} ([green]cached[/], [bright_black]{last_update}[/])" if has_cache
-                else f"- {tname} ([yellow]not cached[/])"
-            )
+        for tname, has_cache, last_update, reason in task_list:
+            if has_cache:
+                self.console.print(
+                    f"- {tname} ([green]cached[/], [bright_black]{last_update}[/])"
+                )
+            else:
+                self.console.print(
+                    # TODO: not an update date, but a warning message
+                    f"- {tname} ([yellow]{reason}[/])"
+                )
         self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
 
@@ -351,7 +356,7 @@ class Shell(Cmd):
             kwargs = self._clean_kwargs(inputs)
             if force:
                 self.cache.clear(task_name)
-            #self._executeone(task_name, **kwargs)
+                # BUG: We don't want the data to be destroyed until new data is successfully made
             task.run(**kwargs)
         return
 

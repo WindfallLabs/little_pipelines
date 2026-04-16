@@ -102,7 +102,7 @@ class Pipeline:
             self._tasks.append(task)
         return
 
-    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool, str]]:
+    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool, str, str]]:
         """Returns a list of task names, optionally with whether or not they have cached results."""
         tasks: list[str] = [t.name for t in self.tasks]
         if not show_has_cached_data:
@@ -110,12 +110,19 @@ class Pipeline:
 
         task_list: list[tuple[str, bool]] = []
         for t in self.tasks:
+            reason = ""
             try:
                 result = t.get_result(True)
                 last_updated = result.last_updated.strftime("%Y-%m-%d")
-                task_list.append((t.name, True, last_updated))
-            except (AttributeError, ValueError):  # Task has no cache attr set
-                task_list.append((t.name, False, "Unknown"))
+                task_list.append((t.name, True, last_updated, reason))
+            except (AttributeError, KeyError, ValueError):
+                # Task has no cache attr set
+                if getattr(t, "cache", None) is None:
+                    reason = "Cache not enabled"
+                # No data in cache
+                else:
+                    reason = "No data"
+                task_list.append((t.name, False, "", reason))
         return task_list
 
     def check_failed_dependencies(self, task: "Task") -> bool:
@@ -261,7 +268,8 @@ class Pipeline:
 
         # Extract tasks from generator
         tasks = list(self.tasks)
-        ntasks = len(tasks)
+        ntasks = len([t for t in tasks if not t.manual_execution_only])
+        manual_tasks = len([t for t in tasks if t.manual_execution_only])
 
         # TODO: Support execution of only one task, optionally without executing upstream dependencies
         if single_task:
@@ -312,8 +320,11 @@ class Pipeline:
         _time = util.time_diff(_start, perf_counter_ns())
         self.message.write("Pipeline Completed", f"Ran {nexec}/{ntasks} tasks in {_time}", **msg.PIPELINE_COMPLETE)
 
-        if nskip > 0:
-            self.message.write(msg=f"Skipped: {nskip}/{ntasks} tasks", **msg.WARN)
+        if nskip > 0 or manual_tasks > 0:
+            man_tasks = ""
+            if manual_tasks > 0:
+                man_tasks = f"(+{manual_tasks} manual-only)"
+            self.message.write(msg=f"Skipped: {nskip}/{ntasks} tasks {man_tasks}", **msg.WARN)
         if nfail > 0:
             self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
         self.message.console.rule()

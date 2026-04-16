@@ -51,7 +51,7 @@ class Task:
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
             #cache_results: bool = True,
-            use_cached_data: bool = True,
+            use_cached_results: bool = True,
             manual_execution_only: bool = False,
         ):
         """
@@ -89,8 +89,7 @@ class Task:
         self._pipeline: Optional["Pipeline"] = None
         # Initialize the cache stuff ....
         self.cache: Cache = cache
-        #self._use_cached_results = cache_results
-        self._use_cached_results = use_cached_data
+        self.use_cached_results = use_cached_results
         self.result_expiry = result_expiry  # NOTE: None
 
     # ========================================================================
@@ -238,7 +237,7 @@ class Task:
                 self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
                 # ------------------------------------------------------
                 # Check if cached data
-                if self._use_cached_results and self.cache is not None and self.name in self.cache.keys():
+                if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
                     with self.message.console.status(f"{self.name}: Checking cache..."):
                         # Attempt to get previously cached results
                         result_obj: CacheResult = self.cache.get(self.name)
