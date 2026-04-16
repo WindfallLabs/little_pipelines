@@ -5,6 +5,7 @@ import os
 import re
 from cmd import Cmd
 from getpass import getuser
+from graphlib import TopologicalSorter
 from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
@@ -196,6 +197,23 @@ class Shell(Cmd):
         self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
         return
 
+    def do_has_dependency(self, inp: str):
+        """
+        Get tasks with the given dependency (task name).
+        """
+        do_sort: bool = "--sort" in inp
+        dep_name = inp.strip().split(" ")[0]
+        task_list: list[str] = []
+        for task_name in self.pipeline.list_tasks():
+            task = self.pipeline.get_task(task_name)
+            if dep_name in task._dependency_names:
+                task_list.append(task.name)
+        if do_sort:
+            task_list.sort()
+        for tname in task_list:
+            self.console.print(tname)
+        return
+
     def do_peek(self, inp: str):  # TODO: add a --details flag
         """
         Preview cached data.
@@ -338,26 +356,64 @@ class Shell(Cmd):
             kwargs[k] = v
         return kwargs
 
-    # TODO: support executing named tasks: `execute One Two`
-    def _execute(self, inp: Optional[str] = "") -> None:
-        """Execute each Task in the Pipeline."""
+    # TODO: support executing one or more tasks: `execute One Two`
+    def _execute(self, inp: str) -> None:
+        """
+        Execute each Task in the Pipeline.
+        If a single task is specified, tasks dependent on it are also executed.
+        
+        Args:
+            --force: Deletes the cache before executing the pipeline
+            --no-upstream: Does not execute upstream tasks. Only used when one task is specified.
+            --no-downstream: Does not execute downstream tasks. Only used when one task is specified.
+        """
         inputs: list[str] = inp.split()
         force: bool = ("--force" in inputs)
+        upstream: bool = not ("--no-upstream" in inputs)  # Default True
+        downstream: bool = not ("--no-downstream" in inputs)  # Default True
+        target_task_name = inputs[0]
+        kwargs = self._clean_kwargs(inputs)
         # Process all tasks
-        if inputs[0] == ".":
+        if target_task_name == ".":
             skipped_tasks: list[str] = self._get_skipped(inputs)
-            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)
-        # Single task
+            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)  # TODO: kwargs?
+            return
+
+        self._execute_single(target_task_name, force=force, upstream=upstream, downstream=downstream, **kwargs)
+        return
+
+    def _execute_single_task(self, target_task_name: str, *, force: bool, upstream: bool, downstream: bool, **kwargs) -> None:
+        """Execute a single task, optionally including upstream and/or downstream tasks."""    
+        if target_task_name not in self.pipeline.list_tasks():
+            raise KeyError(f"No such task: '{target_task_name}'")
+
+        # Set sorter
+        sorter = TopologicalSorter()
+
+        # Get target task
+        target_task = self.pipeline.get_task(target_task_name)
+
+        if upstream:
+            sorter.add(target_task_name, *target_task._dependency_names)
+            for tname in target_task._dependency_names:
+                itask = self.pipeline.get_task(tname)
+                sorter.add(tname, *itask._dependency_names)
         else:
-            task_name = inputs[0]
-            task = self.pipeline.get_task(task_name)
-            if task_name not in self.pipeline.list_tasks():
-                raise KeyError(f"No such task: '{task_name}'")
-            kwargs = self._clean_kwargs(inputs)
+            sorter.add(target_task_name)
+
+        if downstream:
+            for tname in self.pipeline.list_tasks():
+                itask = self.pipeline.get_task(tname)
+                if target_task_name in itask._dependency_names and not itask.manual_execution_only:
+                    sorter.add(tname, *itask._dependency_names)
+
+        # Execute in topological order
+        for tname in sorter.static_order():
+            task = self.pipeline.get_task(tname)
             if force:
-                self.cache.clear(task_name)
-                # BUG: We don't want the data to be destroyed until new data is successfully made
-            task.run(**kwargs)
+                self.cache.clear(tname)
+            task.run(**(kwargs if tname == target_task_name else {}))
+
         return
 
     #@app_logger.catch

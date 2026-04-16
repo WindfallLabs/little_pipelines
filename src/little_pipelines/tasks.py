@@ -50,7 +50,6 @@ class Task:
             if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
             cache: Optional[Cache] = None,
             result_expiry: Optional[dt.datetime|dt.date] = None,
-            #cache_results: bool = True,
             use_cached_results: bool = True,
             manual_execution_only: bool = False,
         ):
@@ -66,7 +65,7 @@ class Task:
             cache_results: Allow the task to save its results to the cache
         """
         self._name: str = name
-        self._dependency_names: set[str] = dependencies if dependencies else set()
+        self._dependency_names: set[str] = set(dependencies) if dependencies else set()
         self.if_upstream_errors = if_upstream_errors
 
         # Flags for pipeline
