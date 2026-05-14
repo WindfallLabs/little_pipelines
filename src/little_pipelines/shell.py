@@ -379,7 +379,7 @@ class Shell(Cmd):
             self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)  # TODO: kwargs?
             return
 
-        self._execute_single(target_task_name, force=force, upstream=upstream, downstream=downstream, **kwargs)
+        self._execute_single_task(target_task_name, force=force, upstream=upstream, downstream=downstream, **kwargs)
         return
 
     def _execute_single_task(self, target_task_name: str, *, force: bool, upstream: bool, downstream: bool, **kwargs) -> None:
