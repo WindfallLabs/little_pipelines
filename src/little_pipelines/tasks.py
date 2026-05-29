@@ -4,18 +4,16 @@ Tasks
 
 import datetime as dt
 from collections.abc import Callable
-from functools import cached_property, wraps
+from functools import wraps
 from inspect import currentframe
-from pathlib import Path
 from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
-from warnings import warn
 
 from . import _messages as msg
 from . import _autodoc, util
 from .caching import Cache, CacheResult  # TODO: rm default_cache
-from ._exceptions import DependencyFailure
+from .exc import PipelineNotSetError
 from ._hashing import hash_file, hash_files
 
 if TYPE_CHECKING:
@@ -44,15 +42,15 @@ def find_tasks(vars: dict[str, Any], nested=True):
 class Task:
     """Parent class for Tasks."""
     def __init__(
-            self: Self,
-            name: str,
-            dependencies: Optional[list[str]] = None,
-            if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
-            cache: Optional[Cache] = None,
-            result_expiry: Optional[dt.datetime|dt.date] = None,
-            use_cached_results: bool = True,
-            manual_execution_only: bool = False,
-        ):
+        self: Self,
+        name: str,
+        dependencies: Optional[list[str]] = None,
+        if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
+        cache: Optional[Cache] = None,
+        result_expiry: Optional[dt.datetime|dt.date] = None,
+        use_cached_results: bool = True,
+        manual_execution_only: bool = False,
+    ):
         """
         Initialize a Task.
 
@@ -138,8 +136,9 @@ class Task:
             return {
                 name: self.pipeline.get_task(name) for name in self._dependency_names
             }
-        warn("Task is not associated with a Pipeline")
-        return dict()
+        raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
+        #warn(f"Task '{self.name}' is not associated with a Pipeline")
+        #return dict()  # TODO: is there a benefit to a warning and returning and empty dict??
 
     @property
     def pipeline(self):
@@ -164,9 +163,18 @@ class Task:
         """Accessor for the Task's result(s)."""
         return self.cache.get(self.name).data
 
-    def get_result(self, details=False) -> Any|CacheResult:
-        """Accessor for the Task's result(s)."""
-        r: CacheResult = self.cache.get(self.name)
+    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|CacheResult:
+        """
+        Gets the Task's result(s).
+
+        Args:
+            details (bool): Returns the result as a CacheResult
+            run_if_not_cached (bool): Runs the task if the results are not already cached and returns the results of that process
+        """
+        if run_if_not_cached and (not self.cache or self.name not in self.cache.keys()):
+            return self.run(**run_kwargs)
+        else:
+            r: CacheResult = self.cache.get(self.name)
         if details:
             return r
         return r.data
@@ -190,6 +198,7 @@ class Task:
         """
         return (self._g.get("__doc__"), _autodoc(self))
 
+    # TODO: deprecate; replace uses with `task.get_dependency("TASK").get_result()`
     def get_dependency_result(self, task_name: str, check_dependency=True):
         """
         Gets another Task's cached result(s).
@@ -209,6 +218,20 @@ class Task:
             else:
                 raise AttributeError(f"{self.name} task has no cache set")
         raise KeyError(f"{task_name} is not a dependency of {self.name}")
+
+    def get_dependency(self, task_name: str) -> "Task":
+        """
+        Gets a dependency (Task object).
+        
+        Args:
+            task_name (str): The name of the Task to retrieve
+        """
+        if not self.pipeline:
+            raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
+        try:
+            return self.dependencies[task_name]
+        except KeyError:
+            raise KeyError(f"{task_name} is not a dependency of {self.name}")
 
     # ========================================================================
     # Decorators

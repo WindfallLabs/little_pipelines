@@ -7,13 +7,11 @@ Pipeline
 from graphlib import TopologicalSorter
 from pathlib import Path
 from time import perf_counter_ns
-from types import ModuleType
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
 from . import util
-#from .caching import Cache, CacheResult
-from ._exceptions import DependencyFailure, PipelineValidationError
+from .exc import PipelineValidationError
 #from ._logger import app_logger
 
 if TYPE_CHECKING:
@@ -29,7 +27,6 @@ class Pipeline:
         self,
         name: str,
         expire_results_if_none: bool = True,
-        #cache: Optional[Cache] = None,
     ):
         """
         Initialize a pipeline.
@@ -44,12 +41,6 @@ class Pipeline:
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
-
-        # Cache
-        #self.cache: Cache = default_cache if cache is None else cache
-        #self.cache: Optional[Cache] = cache if cache else None
-        #self.logger: _Logger = build_logger(name)
-        #self._log_dir: Optional[Path] = None
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -146,33 +137,7 @@ class Pipeline:
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
         return task_lookup[task_name]  # TODO: We want this to error if need be
 
-    # def get_result(self, task_name: str, details=False) -> Any:
-    #     """
-    #     Gets a Task's result from the cache.
-    #     Raises KeyError if result or task doesn't exist.
-    #     """
-    #     # Return cached data if exists
-    #     try:
-    #         result: CacheResult | None = self.cache.get(task_name)
-    #         if details:
-    #             return result
-    #         #if result:  # TODO: and not result.is_expired()
-    #         #    return result.data
-    #         return result.data
-    #     except KeyError:
-    #         pass  # Continue to next try-block
-
-    #     # Run the task and return the result
-    #     try:
-    #         task: "Task" = self.get_task(task_name)
-    #         result: Any = task.run()
-    #         return result
-    #     except KeyError:
-    #         raise KeyError(f"No such task: '{task_name}'")
-    #     except AttributeError:
-    #         raise AttributeError("Task is not associated with a Pipeline")
-
-    def reload_tasks(self, task_name: Optional[str] = ""):
+    def reload_tasks(self, task_name: Optional[str] = ""):  # TODO: buggy, needs tests
         """Reloads task source code to apply any changes to task source code to the pipeline."""
         import importlib.util
         from little_pipelines import Task
@@ -220,26 +185,6 @@ class Pipeline:
                 f"Tasks missing 'run' process: {', '.join(run_errors)}"
             )
         return
-
-    # def _cache_result(self, task: "Task", result: Any):
-    #     """Caches task info and results."""
-    #     # Cache the results
-    #     self.cache.set(
-    #         task.name,
-    #         result,
-    #         #expire=task.expire_results(),
-    #         tag="RESULTS"
-    #     )
-    #     # Cache hashes
-    #     self.cache.set(
-    #         task.name + "_hashes",
-    #         {
-    #             "script": task._script_hash,
-    #             "inputs": task._inputs_hash,
-    #         },
-    #         tag="HASHES"
-    #     )
-    #     return
 
     def execute(
         self,
