@@ -15,6 +15,8 @@ PIPELINE_NAME = ".little-pipelines-tests"
 REMOVE_TEST_DIRECTORY = False
 DO_LOGGING = not REMOVE_TEST_DIRECTORY
 
+CACHE = {}
+
 
 # ============================================================================
 # Helper Functions
@@ -42,25 +44,25 @@ def rm_dir(cache):
 def clean_pipeline():
     """Create a clean pipeline with automatic cleanup."""
     pipeline = lp.Pipeline(PIPELINE_NAME)
-    pipeline.cache.clear()
+    #pipeline.cache.clear()
 
     yield pipeline
 
-    pipeline.cache.clear()
-    if REMOVE_TEST_DIRECTORY:
-        atexit.register(lambda: rm_dir(pipeline.cache))
+    #pipeline.cache.clear()
+    #if REMOVE_TEST_DIRECTORY:
+    #    atexit.register(lambda: rm_dir(pipeline.cache))
 
 
 @pytest.fixture
 def sample_tasks():
     """Create sample tasks for testing (as in README example)."""
-    cache = lp.cache.DictCache()
+    #cache = lp.cache.DictCache()
     zero = lp.Task(
         name="Zero",
         #expire_results=lp.expire.never()
-        cache=cache,
+        cache=CACHE,
     )
-    zero._enable_logging = DO_LOGGING
+    #zero._enable_logging = DO_LOGGING
 
     @zero.process
     def run(this):
@@ -70,9 +72,9 @@ def sample_tasks():
         name="One",
         dependencies=["Zero"],
         #expire_results=lp.expire.never()
-        cache=cache,
+        cache=CACHE,
     )
-    one._enable_logging = DO_LOGGING
+    #one._enable_logging = DO_LOGGING
 
     @one.process
     def preflight(this):
@@ -82,7 +84,7 @@ def sample_tasks():
     def run(this):
         status = this.preflight()
         #data = this.pipeline.get_result("Zero")
-        data = this.cache.get("Zero")
+        data = this.get_dependency("Zero").get_result()
         data.extend(["more", "values", status])
         return data
 

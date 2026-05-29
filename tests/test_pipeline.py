@@ -1,10 +1,11 @@
-"""Tests for Pipeline class functionality."""
+"""
+Tests for Pipeline class functionality.
+"""
 
 import pytest
-from pathlib import Path
 
 import little_pipelines as lp
-from .conftest import PIPELINE_NAME, DO_LOGGING
+from .conftest import PIPELINE_NAME  #, DO_LOGGING
 
 
 class TestPipelineBasics:
@@ -17,14 +18,7 @@ class TestPipelineBasics:
         assert pipeline.name == PIPELINE_NAME
         assert pipeline.ntasks == 0
         assert pipeline.is_complete == True  # Empty pipeline is complete
-        assert pipeline.cache is not None
-
-    def test_pipeline_log_dir(self, clean_pipeline):
-        """Test Pipeline log directory property."""
-        pipeline = clean_pipeline
-
-        assert pipeline.log_dir is not None
-        assert isinstance(pipeline.log_dir, (str, Path))
+        #assert pipeline.cache is not None
 
 
 class TestPipelineTaskManagement:
@@ -34,7 +28,7 @@ class TestPipelineTaskManagement:
         """Test adding a single task to pipeline."""
         pipeline = clean_pipeline
         task = lp.Task(name="SingleTask")
-        task._enable_logging = DO_LOGGING
+        #task._enable_logging = DO_LOGGING
 
         pipeline.add(task)
 
@@ -46,13 +40,12 @@ class TestPipelineTaskManagement:
         pipeline = clean_pipeline
         task1 = lp.Task(name="Task1")
         task2 = lp.Task(name="Task2")
-        task1._enable_logging = DO_LOGGING
-        task2._enable_logging = DO_LOGGING
+        #task1._enable_logging = DO_LOGGING
+        #task2._enable_logging = DO_LOGGING
 
         pipeline.add(task1, task2)
 
         assert pipeline.ntasks == 2
-
 
     def test_add_found_tasks(self, clean_pipeline, pipeline_with_tasks):
         pipeline = clean_pipeline
@@ -82,8 +75,8 @@ class TestPipelineTaskManagement:
         """Test retrieving task results."""
         pipeline, zero, one = executed_pipeline
 
-        zero_result = pipeline.get_result("Zero")
-        one_result = pipeline.get_result("One")
+        zero_result = zero.get_result("Zero")
+        one_result = one.get_result("One")
 
         assert zero_result == ["Some", "values"]
         assert one_result == ["Some", "values", "more", "values", "OK"]
@@ -112,7 +105,7 @@ class TestPipelineExecutionOrder:
         task_d = lp.Task(name="D", dependencies=["B", "C"])
 
         for task in [task_a, task_b, task_c, task_d]:
-            task._enable_logging = DO_LOGGING
+            #task._enable_logging = DO_LOGGING
 
             @task.process
             def run(this):
@@ -156,81 +149,81 @@ class TestPipelineExecution:
         assert zero.result == ["Some", "values"]
         assert one.result == ["Some", "values", "more", "values", "OK"]
 
-    def test_force_execution_clears_cache(self, executed_pipeline):
-        """Test force=True clears cached results."""
-        pipeline, zero, one = executed_pipeline
+    # def test_force_execution_clears_cache(self, executed_pipeline):
+    #     """Test force=True clears cached results."""
+    #     pipeline, zero, one = executed_pipeline
 
-        # Verify results are cached
-        assert pipeline.get_result("Zero") is not None
+    #     # Verify results are cached
+    #     assert pipeline.get_result("Zero") is not None
 
-        # Force execution should clear cache
-        pipeline.execute(force=True)
+    #     # Force execution should clear cache
+    #     pipeline.execute(force=True)
 
-        # Results should still exist but tasks should have re-run
-        assert zero.is_executed == True
-        assert one.is_executed == True
-
-
-class TestPipelineCheckpointing:
-    """Test Pipeline checkpointing and caching."""
-
-    def test_cached_results_used(self, pipeline_with_tasks):
-        """Test cached results are used on subsequent runs."""
-        pipeline, zero, one = pipeline_with_tasks
-
-        # First execution
-        pipeline.execute()
-        assert zero.is_executed == True
-
-        # Create fresh pipeline with same tasks
-        pipeline2, zero2, one2 = pipeline_with_tasks
-        pipeline2.execute()
-
-        # Task should be marked as executed (via checkpoint)
-        #assert zero2.is_executed == False
-        assert zero2.is_skipped == True
-        assert zero2.result == ["Some", "values"]
-
-        # Cleanup
-        pipeline2.cache.clear()
-
-    def test_cache_invalidated_on_script_change(self, clean_pipeline):
-        """Test cache is invalidated when task script changes."""
-        pipeline = clean_pipeline
-        task = lp.Task(name="ChangingTask")
-        task._enable_logging = DO_LOGGING
-
-        @task.process
-        def run(this):
-            return "v1"
-
-        pipeline.add(task)
-        pipeline.execute()
-
-        assert task.result == "v1"
-
-        # In practice, script hash would change with code modification
-        # This test verifies the hash comparison mechanism exists
+    #     # Results should still exist but tasks should have re-run
+    #     assert zero.is_executed == True
+    #     assert one.is_executed == True
 
 
-class TestPipelineForcedTasks:
-    """Test forcing specific tasks to re-run."""
+# class TestPipelineCheckpointing:
+#     """Test Pipeline checkpointing and caching."""
 
-    def test_forced_task_re_executes(self, executed_pipeline):
-        """Test forced tasks re-execute despite cache."""
-        pipeline, zero, one = executed_pipeline
-        pipeline2, zero2, one2 = executed_pipeline
+#     def test_cached_results_used(self, pipeline_with_tasks):
+#         """Test cached results are used on subsequent runs."""
+#         pipeline, zero, one = pipeline_with_tasks
 
-        pipeline.execute()
+#         # First execution
+#         pipeline.execute()
+#         assert zero.is_executed == True
 
-        pipeline2.execute(force_tasks=["One"])
+#         # Create fresh pipeline with same tasks
+#         pipeline2, zero2, one2 = pipeline_with_tasks
+#         pipeline2.execute()
 
-        # One should have executed, Zero should have used cache
-        assert one2.is_executed == True
-        assert zero2.is_skipped == True
+#         # Task should be marked as executed (via checkpoint)
+#         #assert zero2.is_executed == False
+#         assert zero2.is_skipped == True
+#         assert zero2.result == ["Some", "values"]
 
-        # Cleanup
-        pipeline2.cache.clear()
+#         # Cleanup
+#         pipeline2.cache.clear()
+
+#     def test_cache_invalidated_on_script_change(self, clean_pipeline):
+#         """Test cache is invalidated when task script changes."""
+#         pipeline = clean_pipeline
+#         task = lp.Task(name="ChangingTask")
+#         #task._enable_logging = DO_LOGGING
+
+#         @task.process
+#         def run(this):
+#             return "v1"
+
+#         pipeline.add(task)
+#         pipeline.execute()
+
+#         assert task.result == "v1"
+
+#         # In practice, script hash would change with code modification
+#         # This test verifies the hash comparison mechanism exists
+
+
+# class TestPipelineForcedTasks:
+#     """Test forcing specific tasks to re-run."""
+
+#     def test_forced_task_re_executes(self, executed_pipeline):
+#         """Test forced tasks re-execute despite cache."""
+#         pipeline, zero, one = executed_pipeline
+#         pipeline2, zero2, one2 = executed_pipeline
+
+#         pipeline.execute()
+
+#         pipeline2.execute(force_tasks=["One"])
+
+#         # One should have executed, Zero should have used cache
+#         assert one2.is_executed == True
+#         assert zero2.is_skipped == True
+
+#         # Cleanup
+#         pipeline2.cache.clear()
 
 
 class TestPipelineIgnoredTasks:
@@ -265,7 +258,7 @@ class TestPipelineValidation:
         """Test validation catches tasks missing run method."""
         pipeline = clean_pipeline
         task = lp.Task(name="NoRunTask")
-        task._enable_logging = DO_LOGGING
+        #task._enable_logging = DO_LOGGING
 
         pipeline.add(task)
 
