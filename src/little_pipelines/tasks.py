@@ -126,6 +126,7 @@ class Task:
     def message(self):
         # Console messaging
         if self.pipeline:
+            # This essentially gets the longest task name; handles errors
             return self.pipeline.message
         return msg.Message(len(self.name))
 

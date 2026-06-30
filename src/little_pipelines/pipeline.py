@@ -73,7 +73,13 @@ class Pipeline:
     @property
     def message(self) -> msg.Message:
         """Handle writing to the console."""
-        msg_len = 1 + max([len(t.name) for t in self.tasks])
+        lens = [6]  # Default minimum; no need to expose to users
+        for t in self.tasks:
+            try:
+                lens.append(len(t.name))
+            except Exception as e:  # KeyError, but why not everything
+                pass
+        msg_len = max(lens)
         return msg.Message(msg_len)
 
     @property
