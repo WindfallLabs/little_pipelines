@@ -4,6 +4,7 @@ Tasks
 
 import datetime as dt
 from collections.abc import Callable
+from contextlib import contextmanager
 from functools import wraps
 from inspect import currentframe
 from time import perf_counter_ns
@@ -12,7 +13,7 @@ from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _messages as msg
 from . import _autodoc, util
-from .caching import Cache, CacheResult  # TODO: rm default_cache
+from .caching import Cache, CacheResult, Result  # TODO: rm default_cache
 from .exc import PipelineNotSetError
 from ._hashing import hash_file, hash_files
 
@@ -93,6 +94,15 @@ class Task:
     # Properties
 
     @property
+    def results(self):
+        """An accessor for the task's cached results."""
+        #return self.cache.get(task_name=self.name)
+        return {
+            r.name: r.data
+            for r in self.cache.get(task_name=self.name)
+        }
+
+    @property
     def _script_hash(self):
         try:
             return hash_file(self._script_path)
@@ -159,10 +169,20 @@ class Task:
     #         return self.pipeline.logger
     #     return self._logger
 
-    @property  # TODO: remove??
-    def result(self) -> Any:
-        """Accessor for the Task's result(s)."""
-        return self.cache.get(self.name).data
+    # @property  # TODO: remove??
+    # def result(self) -> Any:
+    #     """Accessor for the Task's result(s)."""
+    #     return self.cache.get(self.name).data
+
+    def result(self, name: str, data: Any) -> Result:
+        """Creates a Result object."""
+        r = Result(
+            name=name,
+            task=self.name,
+            data=data,
+            # TODO: expiry and extra
+        )
+        return r
 
     def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|CacheResult:
         """
@@ -237,6 +257,7 @@ class Task:
     # ========================================================================
     # Decorators
 
+    # TODO: Legacy
     def process(self, func: Callable) -> None:
         """Wrapper for custom functions."""
         @wraps(func)
@@ -326,6 +347,98 @@ class Task:
         # Register the custom process with the Task
         setattr(self, func.__name__, _process_wrapper)
         return
+
+    # ========================
+    # TODO: new version (WIP)
+    @contextmanager
+    def _timed(self, func_name: str, complete_kind: dict):
+        """Times a block, records it, and prints the completion message."""
+        _start = perf_counter_ns()
+        yield
+        _time = util.time_diff(_start, perf_counter_ns())
+        self._process_times.append((func_name, _time))
+        self.message.write(self.name, f"(completed in {_time})", **complete_kind)
+
+    def process2(self, func: Callable) -> None:
+        """Wrapper for method-like custom functions."""
+        @wraps(func)
+        def _process_wrapper(*args, **kwargs) -> Any:
+            self.message.write(self.name, f"Running {func.__name__}...", **msg.PROCESS_START)
+            with self._timed(func.__name__, msg.PROCESS_COMPLETE):
+                with self.message.console.status(f"{self.name}: Running {func.__name__}..."):
+                    result = func(self, *args, **kwargs)
+            return result
+
+        setattr(self, func.__name__, _process_wrapper)
+        return
+
+    def _load_cached_result(self) -> CacheResult|None:
+        """Checks for cached data"""
+        if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
+            with self.message.console.status(f"{self.name}: Checking cache..."):
+                # Attempt to get previously cached results
+                result_obj: CacheResult = self.cache.get(self.name)
+            try:
+                cached_result: Any|None = self.cache_read_callback(result_obj)
+                if cached_result is not None:
+                    self.message.write(
+                        self.name,
+                        f"Loaded cached result ({type(cached_result).__name__})",
+                        **msg.WARN
+                    )
+                    self.is_skipped = True
+                    # TODO: we need to return a tuple[CacheResult] if there are multiple results related to TaskName
+                    return cached_result
+            except Exception as e:  # TODO:
+                print("Couldn't load cached data")
+                print(e)
+
+        elif self.cache is None:
+            self.message.write(self.name, "No Cache set", **msg.WARN)
+        return None
+
+    def main(self, func: Callable) -> None:
+        """Wraps the task's main function."""
+        @wraps(func)
+        def _main_wrapper(*args, **kwargs) -> Any:
+            self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
+
+            with self._timed(func.__name__, msg.TASK_COMPLETE):
+                # Run the main function
+                raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
+
+                # Cache the results
+                # TODO: if not use_cache...
+                results: tuple[Any]|tuple[Result]
+                if type(raw_results) is not tuple:
+                    results = (raw_results,)
+                else:
+                    results = raw_results
+                
+                return_data: list[Any] = []
+                for r in results:
+                    if isinstance(r, Result):
+                        self.cache.put(r)
+                        return_data.append(r.data)
+                    # Assume single non-Result value
+                    else:
+                        result = Result(
+                            name=self.name,
+                            task=self.name,
+                            data=r,
+                        )
+                        self.cache.put(result)
+                        return_data.append(r)
+
+            self._executed = True
+            return (
+                return_data[0] if len(return_data) == 1
+                else tuple(return_data)
+            )
+
+        setattr(self, "main", _main_wrapper)
+        return
+
 
     # ========================================================================
     # Dunders

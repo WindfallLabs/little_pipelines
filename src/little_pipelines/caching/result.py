@@ -7,13 +7,12 @@ The `extra` attribute must be a (pickled) dataclass or None.
 
 import datetime as dt
 import json
-import pickle
 import sqlite3
 from dataclasses import asdict, dataclass, is_dataclass
 from hashlib import sha256
 from typing import Any, Optional, TYPE_CHECKING
 
-from .serialize import CacheSerializer
+from .serialize import CacheSerializer, Serializer
 
 if TYPE_CHECKING:
     from .cache import Cache
@@ -21,6 +20,63 @@ if TYPE_CHECKING:
 
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
+
+@dataclass(eq=True)
+class Result:
+    name: str
+    task: str
+    data: Any
+    dtype: Optional[str] = None
+    last_updated: Optional[dt.datetime] = None
+    expiry: Optional[dt.datetime] = None
+    extra: Optional[dict] = None
+
+    _datetime_format = _DATETIME_FMT
+
+    def __post_init__(self):
+        if self.dtype is None:
+            self.dtype = str(type(self.data))
+        if self.last_updated is None:
+            self.last_updated = dt.datetime.now()
+
+    def as_row(self, serializer: Serializer):
+        """Return the Result as an SQLite-insertable row."""
+        serialized_data: bytes = serializer.dumps(self.data)
+        last_updated: str = self.last_updated.strftime(self._datetime_format)
+        expiry: str = self.expiry.strftime(self._datetime_format) if self.expiry else None
+        extra: str = json.dumps(self.extra)
+        row = (
+            self.name,
+            self.task,
+            self.dtype,
+            last_updated,
+            expiry,
+            serialized_data,
+            extra,
+        )
+        return row
+
+    @classmethod
+    def from_row(cls, row, cache: "Cache") -> "Result":
+        """Deserialize data from an SQLite row."""
+        serializer: Serializer = cache.get_serializer(row["dtype"])
+        data: Any = serializer.loads(row["data"])
+        last_updated: dt.datetime = dt.datetime.strptime(row["last_updated"], cls._datetime_format)
+        expiry: dt.datetime = dt.datetime.strptime(row["expiry"], cls._datetime_format) if row["expiry"] else None
+        extra: dict = json.loads(row["extra"])
+        result = cls(
+            row["name"],
+            row["task"],
+            data,
+            row["dtype"],
+            last_updated,
+            expiry,
+            extra,
+        )
+        return result
+
+
+# ================================================================================================
 
 @dataclass
 class CacheResult:
