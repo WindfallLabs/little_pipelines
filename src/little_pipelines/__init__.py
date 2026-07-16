@@ -1,7 +1,7 @@
 #from . import cache
 from . import caching
 from . import exc
-from .caching import CacheResult
+from .caching import CacheResult, Result, Cache2
 from . import expire
 from ._autodoc import _autodoc
 #from ._exceptions import *

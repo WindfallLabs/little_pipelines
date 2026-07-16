@@ -5,7 +5,6 @@ Pipeline
 # BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
 
 from graphlib import TopologicalSorter
-from pathlib import Path
 from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
@@ -37,7 +36,7 @@ class Pipeline:
         """
         self.name = name
         self.expire_results_if_none = expire_results_if_none
-        #self.cache = cache  # TODO: more
+        #self.cache = cache  # TODO: maybe
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
@@ -143,38 +142,39 @@ class Pipeline:
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
         return task_lookup[task_name]  # TODO: We want this to error if need be
 
-    def reload_tasks(self, task_name: Optional[str] = ""):  # TODO: buggy, needs tests
-        """Reloads task source code to apply any changes to task source code to the pipeline."""
-        import importlib.util
-        from little_pipelines import Task
+    # TODO: this doesn't work anyway
+    # def reload_tasks(self, task_name: Optional[str] = ""):  # TODO: buggy, needs tests
+    #     """Reloads task source code to apply any changes to task source code to the pipeline."""
+    #     import importlib.util
+    #     from little_pipelines import Task
 
-        for task in self.tasks:
-            if task_name and task.name != task_name:
-                continue  # Skip until named task is found, if named task
-            # Get the script containing the task's source code / definition as a module
-            spec = importlib.util.spec_from_file_location(
-                Path(task._script_path).name.strip(".py"),
-                task._script_path
-            )
-            module = importlib.util.module_from_spec(spec)
-            # Re-import
-            spec.loader.exec_module(module)
-            # Rebuild the task on the pipeline
-            idx = self._tasks.index(task)  # Index of task on the pipeline
-            # Get the variable name in the module
-            task_var_name = [k for k, v in vars(module).items() if isinstance(v, Task)][0]
-            # Set the 'new' task on the pipeline
-            self._tasks[idx] = getattr(module, task_var_name)
+    #     for task in self.tasks:
+    #         if task_name and task.name != task_name:
+    #             continue  # Skip until named task is found, if named task
+    #         # Get the script containing the task's source code / definition as a module
+    #         spec = importlib.util.spec_from_file_location(
+    #             Path(task._script_path).name.strip(".py"),
+    #             task._script_path
+    #         )
+    #         module = importlib.util.module_from_spec(spec)
+    #         # Re-import
+    #         spec.loader.exec_module(module)
+    #         # Rebuild the task on the pipeline
+    #         idx = self._tasks.index(task)  # Index of task on the pipeline
+    #         # Get the variable name in the module
+    #         task_var_name = [k for k, v in vars(module).items() if isinstance(v, Task)][0]
+    #         # Set the 'new' task on the pipeline
+    #         self._tasks[idx] = getattr(module, task_var_name)
 
-        return
+    #     return
 
     def validate_tasks(self):
         """Pre-flight checks."""
         run_errors: list[str] = []
 
-        # Check if task has run method (required)
+        # Check if task has main or run method (required)
         for task in self._tasks:  # Unsorted
-            if not hasattr(task, "run"):
+            if not hasattr(task, "main") and not hasattr(task, "run"):  # TODO: deprecate 'run'
                 run_errors.append(task.name)
 
         # Check if task dependencies are imported
@@ -230,6 +230,7 @@ class Pipeline:
         for task in tasks:
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
+                #task.is_skipped = True  # TODO: this makes sense right?
                 continue
             if force_all or task.name in force_tasks:
                 task.cache.clear(task.name)
@@ -250,14 +251,17 @@ class Pipeline:
                     continue
 
                 # Execute
-                result: Any = task.run()
+                if hasattr(task, "run"):  # TODO: deprecate
+                    result: Any = task.run()
+                else:
+                    result: Any = task.main()
                 if result is None:
                     self.message.write(task.name, "Result is None", **msg.WARN)
                 nexec += 1
 
             except Exception as e:
                 self.failures.add(task.name)
-                self.message.write(task.name, e, **msg.FAIL)
+                self.message.write(task.name, f"{e.__class__.__name__}: {e}", **msg.FAIL)
                 # TODO: Log full stack
                 nfail += 1
 

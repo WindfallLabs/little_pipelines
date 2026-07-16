@@ -242,11 +242,12 @@ class Cache2:
         if return_raw_rows:
             return [dict(r) for r in rows]
 
-        results = []
+        results: list[Result] = []
         for row in rows:
             results.append(
                 Result.from_row(row, self)
             )
+        assert isinstance(results, list)
 
         return results
         

@@ -64,7 +64,8 @@ class Task:
             cache_results: Allow the task to save its results to the cache
         """
         self._name: str = name
-        self._dependency_names: set[str] = set(dependencies) if dependencies else set()
+        self._dependency_names: frozenset[str] = frozenset(dependencies) if dependencies else set()
+        self._dependencies: Optional[dict[str, Any]] = None
         self.if_upstream_errors = if_upstream_errors
 
         # Flags for pipeline
@@ -89,18 +90,24 @@ class Task:
         self.cache: Cache = cache
         self.use_cached_results = use_cached_results
         self.result_expiry = result_expiry  # NOTE: None
+        self._result_names = set()
 
     # ========================================================================
     # Properties
 
     @property
-    def results(self):
+    def results(self) -> dict[str|int, Any]:
         """An accessor for the task's cached results."""
         #return self.cache.get(task_name=self.name)
-        return {
+        r: dict[str|int, Any] = {
             r.name: r.data
             for r in self.cache.get(task_name=self.name)
         }
+        # Create a list-like 0-index shorthand accessor
+        if len(r.keys()) == 1:
+            r[0] = r[self.name]
+        
+        return r
 
     @property
     def _script_hash(self):
@@ -143,11 +150,24 @@ class Task:
     @property
     def dependencies(self) -> dict[str, Self] | None:
         """Up-stream tasks this task depends on."""
-        if self.pipeline is not None:
-            return {
-                name: self.pipeline.get_task(name) for name in self._dependency_names
-            }
-        raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
+        # if self.pipeline is not None:
+        #     return {
+        #         name: self.pipeline.get_task(name) for name in self._dependency_names
+        #     }
+        # raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
+
+        if not self._dependencies:
+            if type(self.cache).__name__ == "Cache":  # TODO: Deprecate
+                self._dependencies = {
+                    d: self.cache.get(d).data for d in self._dependency_names
+                }
+            else:
+                self._dependencies = {
+                    d: self.cache.get(d)[0] for d in self._dependency_names
+                }
+        
+        return self._dependencies
+
         #warn(f"Task '{self.name}' is not associated with a Pipeline")
         #return dict()  # TODO: is there a benefit to a warning and returning and empty dict??
 
@@ -174,14 +194,20 @@ class Task:
     #     """Accessor for the Task's result(s)."""
     #     return self.cache.get(self.name).data
 
-    def result(self, name: str, data: Any) -> Result:
+    def result(self, data: Any, name: Optional[str] = None) -> Result:
         """Creates a Result object."""
+        # The default result name is the same as the task
+        if not name:
+            name = self.name
+        if name in self._result_names:
+            raise ValueError(f"This task already returns a result with name '{name}'")
         r = Result(
             name=name,
             task=self.name,
             data=data,
             # TODO: expiry and extra
         )
+        self._result_names.add(name)
         return r
 
     def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|CacheResult:
@@ -240,6 +266,8 @@ class Task:
                 raise AttributeError(f"{self.name} task has no cache set")
         raise KeyError(f"{task_name} is not a dependency of {self.name}")
 
+    # TODO: rename to _get_task and allow it to get tasks outside of dependencies
+    # There's no reason a user should be manipulating tasks from another task
     def get_dependency(self, task_name: str) -> "Task":
         """
         Gets a dependency (Task object).
@@ -325,7 +353,7 @@ class Task:
                         self.cache.set(self.name, result, extra)
                 except Exception as e:
                     self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
-                    self.message.write(msg=e, **msg.FAIL)
+                    self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
 
             # Sum the process duration
             _time = util.time_diff(_start, perf_counter_ns())
@@ -357,7 +385,8 @@ class Task:
         yield
         _time = util.time_diff(_start, perf_counter_ns())
         self._process_times.append((func_name, _time))
-        self.message.write(self.name, f"(completed in {_time})", **complete_kind)
+        if self._executed:
+            self.message.write(self.name, f"(completed in {_time})", **complete_kind)
 
     def process2(self, func: Callable) -> None:
         """Wrapper for method-like custom functions."""
@@ -405,7 +434,12 @@ class Task:
 
             with self._timed(func.__name__, msg.TASK_COMPLETE):
                 # Run the main function
-                raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
+                try:
+                    raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
+                except Exception as e:
+                    self.message.write(msg=f"Failed to run function 'main'", **msg.FAIL)
+                    self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    return
 
                 # Cache the results
                 # TODO: if not use_cache...
@@ -418,8 +452,7 @@ class Task:
                 return_data: list[Any] = []
                 for r in results:
                     if isinstance(r, Result):
-                        self.cache.put(r)
-                        return_data.append(r.data)
+                        result: Result = r
                     # Assume single non-Result value
                     else:
                         result = Result(
@@ -427,12 +460,18 @@ class Task:
                             task=self.name,
                             data=r,
                         )
+                    try:
                         self.cache.put(result)
-                        return_data.append(r)
+                        self._executed = True
+                    except Exception as e:
+                        self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
+                        self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    return_data.append(result.data)
 
-            self._executed = True
             return (
+                # Return the single instance of original data
                 return_data[0] if len(return_data) == 1
+                # Or a tuple if many
                 else tuple(return_data)
             )
 

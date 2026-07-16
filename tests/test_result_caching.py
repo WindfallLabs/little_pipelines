@@ -1,13 +1,9 @@
-"""
-Test the caching of results
-"""
+import pytest
 
-from little_pipelines.caching import Cache2, Result, Serializer, DefaultSerializer, StrSerializer
+from little_pipelines import Cache2, Result
 
 
-# TESTS
-
-def tests():
+def test_result_caching():
     cache = Cache2()
     result_name = "TEST-RESULT"
     task_name = "TEST-TASK"
@@ -37,6 +33,7 @@ def tests():
     }]
 
     # Test clear
+    assert len(cache.keys()) > 0
     assert cache.clear("TEST-*") is True
     assert cache.keys() == []
 
