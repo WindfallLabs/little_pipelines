@@ -1,11 +1,11 @@
 import pytest
 
-from little_pipelines import Cache2, Task, Result
+from little_pipelines import Cache, Task
 
 
 @pytest.fixture
 def cache():
-    return Cache2()
+    return Cache()
 
 
 @pytest.fixture

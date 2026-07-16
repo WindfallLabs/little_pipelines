@@ -1,10 +1,20 @@
 import pytest
 
-from little_pipelines import Cache2, Result
+from little_pipelines import Cache, Result, Task
+from little_pipelines import exc
+
+
+def test_not_cached():
+    cache = Cache()
+    
+    task = Task("Not Cached", cache=cache, dependencies=["Doesn't Exist"])
+
+    with pytest.raises(exc.DependencyNotFoundError):
+        task.dependencies["Doesn't Exist"]
 
 
 def test_result_caching():
-    cache = Cache2()
+    cache = Cache()
     result_name = "TEST-RESULT"
     task_name = "TEST-TASK"
     extra_data = {"NOTE": "Hello"}

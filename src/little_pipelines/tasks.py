@@ -13,8 +13,8 @@ from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _messages as msg
 from . import _autodoc, util
-from .caching import Cache, CacheResult, Result  # TODO: rm default_cache
-from .exc import PipelineNotSetError
+from .caching import Cache, Result
+from .exc import PipelineNotSetError, DependencyNotFoundError
 from ._hashing import hash_file, hash_files
 
 if TYPE_CHECKING:
@@ -148,28 +148,21 @@ class Task:
         return msg.Message(len(self.name))
 
     @property
-    def dependencies(self) -> dict[str, Self] | None:
-        """Up-stream tasks this task depends on."""
-        # if self.pipeline is not None:
-        #     return {
-        #         name: self.pipeline.get_task(name) for name in self._dependency_names
-        #     }
-        # raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
-
+    def dependencies(self) -> dict[str, Result] | None:
+        """Results of upstream Tasks that this Task depends on."""
+        # Create _dependencies if it is None
         if not self._dependencies:
-            if type(self.cache).__name__ == "Cache":  # TODO: Deprecate
-                self._dependencies = {
-                    d: self.cache.get(d).data for d in self._dependency_names
-                }
-            else:
-                self._dependencies = {
-                    d: self.cache.get(d)[0] for d in self._dependency_names
-                }
-        
-        return self._dependencies
+            deps: dict[str, Any] = {}
+            for d in self._dependency_names:
+                try:
+                    dep: Result = self.cache.get(d)[0]
+                    deps[d] = dep
+                except IndexError:
+                    raise DependencyNotFoundError(f"'{d}' not in cache")
 
-        #warn(f"Task '{self.name}' is not associated with a Pipeline")
-        #return dict()  # TODO: is there a benefit to a warning and returning and empty dict??
+            self._dependencies = deps
+
+        return self._dependencies
 
     @property
     def pipeline(self):
@@ -210,23 +203,23 @@ class Task:
         self._result_names.add(name)
         return r
 
-    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|CacheResult:
+    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|Result:
         """
         Gets the Task's result(s).
 
         Args:
-            details (bool): Returns the result as a CacheResult
+            details (bool): Returns the result as a Result
             run_if_not_cached (bool): Runs the task if the results are not already cached and returns the results of that process
         """
         if run_if_not_cached and (not self.cache or self.name not in self.cache.keys()):
             return self.run(**run_kwargs)
         else:
-            r: CacheResult = self.cache.get(self.name)
+            r: Result = self.cache.get(self.name)
         if details:
             return r
         return r.data
 
-    def _default_cache_read_callback(self, cached_result: CacheResult) -> Any:
+    def _default_cache_read_callback(self, cached_result: Result) -> Any:
         """The default cache-read callback."""
         return cached_result.data
 
@@ -236,7 +229,7 @@ class Task:
         self._cache_read_callback = MethodType(func, self)
         return func
 
-    def cache_read_callback(self, cached_result: CacheResult):
+    def cache_read_callback(self, cached_result: Result):
         return self._cache_read_callback(cached_result)
 
     def get_info(self) -> tuple[str, str]:
@@ -246,7 +239,7 @@ class Task:
         return (self._g.get("__doc__"), _autodoc(self))
 
     # TODO: deprecate; replace uses with `task.get_dependency("TASK").get_result()`
-    def get_dependency_result(self, task_name: str, check_dependency=True):
+    def __get_dependency_result(self, task_name: str, check_dependency=True):
         """
         Gets another Task's cached result(s).
         
@@ -259,7 +252,7 @@ class Task:
         if task_name in self._dependency_names or check_dependency is False:
             if self.cache is not None:
                 try:
-                    return self.cache.get(task_name).data
+                    return self.cache.get(task_name)[0].data
                 except KeyError as e:
                     raise e  # TODO: execute dependency?
             else:
@@ -286,7 +279,7 @@ class Task:
     # Decorators
 
     # TODO: Legacy
-    def process(self, func: Callable) -> None:
+    def __process_old(self, func: Callable) -> None:
         """Wrapper for custom functions."""
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> None:
@@ -312,7 +305,7 @@ class Task:
                 if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
                     with self.message.console.status(f"{self.name}: Checking cache..."):
                         # Attempt to get previously cached results
-                        result_obj: CacheResult = self.cache.get(self.name)
+                        result_obj: Result = self.cache.get(self.name)
                     cached_result: Any|None = self.cache_read_callback(result_obj)
                     if cached_result is not None:
                         self.message.write(
@@ -352,8 +345,8 @@ class Task:
                             extra = self.extra
                         self.cache.set(self.name, result, extra)
                 except Exception as e:
-                    self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
-                    self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
+                    self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
 
             # Sum the process duration
             _time = util.time_diff(_start, perf_counter_ns())
@@ -388,7 +381,7 @@ class Task:
         if self._executed:
             self.message.write(self.name, f"(completed in {_time})", **complete_kind)
 
-    def process2(self, func: Callable) -> None:
+    def process(self, func: Callable) -> None:
         """Wrapper for method-like custom functions."""
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> Any:
@@ -401,12 +394,12 @@ class Task:
         setattr(self, func.__name__, _process_wrapper)
         return
 
-    def _load_cached_result(self) -> CacheResult|None:
+    def _load_cached_result(self) -> Result|None:
         """Checks for cached data"""
         if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
             with self.message.console.status(f"{self.name}: Checking cache..."):
                 # Attempt to get previously cached results
-                result_obj: CacheResult = self.cache.get(self.name)
+                result_obj: Result = self.cache.get(self.name)
             try:
                 cached_result: Any|None = self.cache_read_callback(result_obj)
                 if cached_result is not None:
@@ -416,7 +409,7 @@ class Task:
                         **msg.WARN
                     )
                     self.is_skipped = True
-                    # TODO: we need to return a tuple[CacheResult] if there are multiple results related to TaskName
+                    # TODO: we need to return a tuple[Result] if there are multiple results related to TaskName
                     return cached_result
             except Exception as e:  # TODO:
                 print("Couldn't load cached data")
@@ -425,6 +418,30 @@ class Task:
         elif self.cache is None:
             self.message.write(self.name, "No Cache set", **msg.WARN)
         return None
+
+    def _process_results(self, results) -> list[Any]:
+        """Handles return values as Results and puts them in the Cache."""
+        #if not self.cache: ...  # TODO:
+        return_data: list[Any] = []
+        for r in results:
+            if isinstance(r, Result):
+                result: Result = r
+            # Assume single non-Result value
+            else:
+                result = Result(
+                    name=self.name,
+                    task=self.name,
+                    data=r,
+                )
+            try:
+                self.cache.put(result)
+                self._executed = True
+            except Exception as e:
+                self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
+                self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+            return_data.append(result.data)
+        return return_data
+
 
     def main(self, func: Callable) -> None:
         """Wraps the task's main function."""
@@ -437,8 +454,8 @@ class Task:
                 try:
                     raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
-                    self.message.write(msg=f"Failed to run function 'main'", **msg.FAIL)
-                    self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    self.message.write(self.name, msg=f"Failed to run function 'main'", **msg.FAIL)
+                    self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
                     return
 
                 # Cache the results
@@ -448,25 +465,8 @@ class Task:
                     results = (raw_results,)
                 else:
                     results = raw_results
-                
-                return_data: list[Any] = []
-                for r in results:
-                    if isinstance(r, Result):
-                        result: Result = r
-                    # Assume single non-Result value
-                    else:
-                        result = Result(
-                            name=self.name,
-                            task=self.name,
-                            data=r,
-                        )
-                    try:
-                        self.cache.put(result)
-                        self._executed = True
-                    except Exception as e:
-                        self.message.write(msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
-                        self.message.write(msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
-                    return_data.append(result.data)
+
+                return_data = self._process_results(results)
 
             return (
                 # Return the single instance of original data

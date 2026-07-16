@@ -10,6 +10,10 @@ Exceptions
 #     pass
 
 
+class DependencyNotFoundError(Exception):
+    """Exception raised when a dependancy Result is not in the cache."""
+    pass
+
 class TaskNotFoundError(Exception):
     """Exception raised when a specific Task is not found in the registry."""
     pass

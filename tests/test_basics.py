@@ -5,7 +5,7 @@ import little_pipelines as lp
 
 @pytest.fixture
 def cache():
-    return lp.Cache2()
+    return lp.Cache()
 
 
 @pytest.fixture
@@ -21,14 +21,20 @@ def meaning_task(cache):
 
 @pytest.fixture
 def addition_task(cache, meaning_task):
-    add_task = lp.Task("Addition", cache=cache, dependencies=["Meaning"])
+    task = lp.Task("Addition", cache=cache, dependencies=["Meaning"])
 
-    @add_task.main
+    @task.process
+    def add(t: lp.Task):
+        meaning = t.dependencies["Meaning"].data
+        r = meaning + 8
+        return r
+    
+    @task.main
     def main(t: lp.Task):
-        meaning = t.dependencies["Meaning"]
-        return meaning.data + 8
+        r: int = t.add()
+        return r
 
-    return add_task
+    return task
 
 
 def test_single_task(cache, meaning_task):

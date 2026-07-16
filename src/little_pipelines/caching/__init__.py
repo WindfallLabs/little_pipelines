@@ -1,3 +1,3 @@
-from .cache import Cache, Cache2, default_cache
-from .result import CacheResult, Result
+from .cache import Cache
+from .result import Result
 from .serialize import CacheSerializer, Serializer, DefaultSerializer, StrSerializer

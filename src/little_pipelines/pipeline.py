@@ -9,6 +9,7 @@ from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
+from . import Cache
 from . import util
 from .exc import PipelineValidationError
 #from ._logger import app_logger
@@ -26,6 +27,7 @@ class Pipeline:
         self,
         name: str,
         expire_results_if_none: bool = True,
+        cache=None,
     ):
         """
         Initialize a pipeline.
@@ -36,10 +38,13 @@ class Pipeline:
         """
         self.name = name
         self.expire_results_if_none = expire_results_if_none
-        #self.cache = cache  # TODO: maybe
+        self.cache: Cache = cache  # TODO: maybe
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
+
+        # Registry of task:dependencies
+        self._task_deps: dict[str, list[str]] = {}
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -62,13 +67,6 @@ class Pipeline:
         """Task count."""
         return len(self._tasks)
 
-    #@cached_property
-    # @property
-    # def _max_task_name_len(self) -> int:
-    #     """Names of all tasks."""
-    #     return 1 + max([len(t.name) for t in self.tasks])
-
-    #@cached_property
     @property
     def message(self) -> msg.Message:
         """Handle writing to the console."""
@@ -84,10 +82,18 @@ class Pipeline:
     @property
     def tasks(self) -> Generator["Task"]:
         """Generates the execution order of tasks based on dependencies."""
-        deps: dict[str, list[str]] = {
-            dep.name: dep._dependency_names for dep in self._tasks
-        }
-        for cls_name in TopologicalSorter(deps).static_order():
+        if not self._task_deps:
+            for task in self._tasks:
+                self._task_deps[task.name] = []
+                for dep_name in task._dependency_names:
+                    try:
+                        # Find Task-dependencies
+                        _ = self.get_task(dep_name)
+                        self._task_deps[task.name].append(dep_name)
+                    except KeyError:
+                        # Assume non-task dependencies are Result-dependencies
+                        continue
+        for cls_name in TopologicalSorter(self._task_deps).static_order():
             task: "Task" = self.get_task(cls_name)
             yield task
 
@@ -140,33 +146,11 @@ class Pipeline:
     def get_task(self, task_name: str):
         """Gets a task by name."""
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
-        return task_lookup[task_name]  # TODO: We want this to error if need be
-
-    # TODO: this doesn't work anyway
-    # def reload_tasks(self, task_name: Optional[str] = ""):  # TODO: buggy, needs tests
-    #     """Reloads task source code to apply any changes to task source code to the pipeline."""
-    #     import importlib.util
-    #     from little_pipelines import Task
-
-    #     for task in self.tasks:
-    #         if task_name and task.name != task_name:
-    #             continue  # Skip until named task is found, if named task
-    #         # Get the script containing the task's source code / definition as a module
-    #         spec = importlib.util.spec_from_file_location(
-    #             Path(task._script_path).name.strip(".py"),
-    #             task._script_path
-    #         )
-    #         module = importlib.util.module_from_spec(spec)
-    #         # Re-import
-    #         spec.loader.exec_module(module)
-    #         # Rebuild the task on the pipeline
-    #         idx = self._tasks.index(task)  # Index of task on the pipeline
-    #         # Get the variable name in the module
-    #         task_var_name = [k for k, v in vars(module).items() if isinstance(v, Task)][0]
-    #         # Set the 'new' task on the pipeline
-    #         self._tasks[idx] = getattr(module, task_var_name)
-
-    #     return
+        try:
+            t = task_lookup[task_name]
+            return t
+        except KeyError:
+            raise KeyError(f"No such task: {task_name}")
 
     def validate_tasks(self):
         """Pre-flight checks."""
@@ -179,10 +163,11 @@ class Pipeline:
 
         # Check if task dependencies are imported
         # TODO: improve this so that the error returns a list of all invalid deps
-        try:
-            list(self.tasks)  # TODO: this is a shorthand workaround for now
-        except KeyError as e:
-            raise PipelineValidationError(f"Missing dependency for TODO: {e}")  # TODO: task name
+        # try:
+        #     list(self.tasks)  # TODO: this is a shorthand workaround for now
+        # except KeyError as e:
+        #     raise PipelineValidationError(f"Missing dependency for {task.name}: {e}")  # TODO: task name
+        # Removed to allow access to non-task cached Results
 
         # TODO: More checks?
 

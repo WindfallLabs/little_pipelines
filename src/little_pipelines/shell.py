@@ -49,6 +49,8 @@ class Shell(Cmd):
 
     def do_exit(self, inp: str = "") -> Literal[True]:
         """Exits the shell"""
+        # if self.pipeline and hasattr(self.pipeline, "cache"):
+        #     self.pipeline.cache._conn.close()
         return True
 
     def do_quit(self, inp: str = "") -> Literal[True]:
@@ -223,7 +225,7 @@ class Shell(Cmd):
         """
         task_name = inp.split()[0]
         try:
-            result = self.cache.get(task_name).data
+            result = self.cache.get(task_name)[0].data
         except KeyError as e:
             self.message.write(msg=e, **msg.SHELL_FAIL)
             return
@@ -412,7 +414,10 @@ class Shell(Cmd):
             task = self.pipeline.get_task(tname)
             if force:
                 self.cache.clear(tname)
-            task.run(**(kwargs if tname == target_task_name else {}))
+            if hasattr(task, "run"):
+                task.run(**(kwargs if tname == target_task_name else {}))  # TODO Deprecate
+            else:
+                task.main(**(kwargs if tname == target_task_name else {}))
 
         return
 
