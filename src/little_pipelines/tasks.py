@@ -40,6 +40,24 @@ def find_tasks(vars: dict[str, Any], nested=True):
     return found_instances
 
 
+class DependencyDict(dict):
+    def __init__(self, d: dict = None):
+        if d is None:
+            d = {}
+        super().__init__(d)
+    
+    # def __get__(self, obj, objtype=None):
+    #     if obj is None:
+    #         return self
+    #     return self
+    
+    def __getitem__(self, key):
+        try:
+            return super().__getitem__(key)
+        except KeyError as e:
+            raise KeyError(f"Dependency '{key}' not in Task.dependencies list") from e
+
+
 class Task:
     """Parent class for Tasks."""
     def __init__(
@@ -155,12 +173,12 @@ class Task:
             deps: dict[str, Any] = {}
             for d in self._dependency_names:
                 try:
-                    dep: Result = self.cache.get(d)[0]
+                    dep: Result = self.cache.get(result_name=d)[0]
                     deps[d] = dep
                 except IndexError:
                     raise DependencyNotFoundError(f"'{d}' not in cache")
 
-            self._dependencies = deps
+            self._dependencies = DependencyDict(deps)
 
         return self._dependencies
 
@@ -193,7 +211,12 @@ class Task:
         if not name:
             name = self.name
         if name in self._result_names:
-            raise ValueError(f"This task already returns a result with name '{name}'")
+            if self._executed:
+                # If the task is executed multiple times
+                return self.results[name]
+            else:
+                # If a result is set with a non-unique name
+                raise ValueError(f"This task already returns a result with name '{name}'")
         r = Result(
             name=name,
             task=self.name,
@@ -435,16 +458,16 @@ class Task:
                 )
             try:
                 self.cache.put(result)
-                self._executed = True
             except Exception as e:
                 self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
                 self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
             return_data.append(result.data)
+
         return return_data
 
 
     def main(self, func: Callable) -> None:
-        """Wraps the task's main function."""
+        """Wraps the task's user-defined 'main' function."""
         @wraps(func)
         def _main_wrapper(*args, **kwargs) -> Any:
             self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
@@ -454,7 +477,7 @@ class Task:
                 try:
                     raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
-                    self.message.write(self.name, msg=f"Failed to run function 'main'", **msg.FAIL)
+                    self.message.write(self.name, msg=f"Failed to run function 'main/{func.__name__}'", **msg.FAIL)
                     self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
                     return
 
@@ -467,6 +490,7 @@ class Task:
                     results = raw_results
 
                 return_data = self._process_results(results)
+            self._executed = True
 
             return (
                 # Return the single instance of original data

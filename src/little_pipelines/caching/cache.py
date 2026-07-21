@@ -217,6 +217,8 @@ class Cache:
 
     def get(self, result_name: Optional[str] = None, task_name: Optional[str] = None, return_raw_rows=False) -> list[Result] | list[dict[str, Any]]:
         """Gets a list of Results from the cache."""
+        if not result_name and not task_name:
+            raise AttributeError("Empty dependency name")
         if not ((result_name or task_name) and not (result_name and task_name)):
             raise AttributeError("Either a result_name or task_name is required")
         

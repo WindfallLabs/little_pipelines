@@ -389,35 +389,29 @@ class Shell(Cmd):
         if target_task_name not in self.pipeline.list_tasks():
             raise KeyError(f"No such task: '{target_task_name}'")
 
-        # Set sorter
-        sorter = TopologicalSorter()
-
-        # Get target task
         target_task = self.pipeline.get_task(target_task_name)
 
+        upstream_tasks = []
         if upstream:
-            sorter.add(target_task_name, *target_task._dependency_names)
-            for tname in target_task._dependency_names:
-                itask = self.pipeline.get_task(tname)
-                sorter.add(tname, *itask._dependency_names)
-        else:
-            sorter.add(target_task_name)
-
+            upstream_tasks = self.pipeline.get_upstream_tasks(target_task_name)
+        
+        downstream_tasks = []
         if downstream:
-            for tname in self.pipeline.list_tasks():
-                itask = self.pipeline.get_task(tname)
-                if target_task_name in itask._dependency_names and not itask.manual_execution_only:
-                    sorter.add(tname, *itask._dependency_names)
+            downstream_tasks = self.pipeline.get_downstream_tasks(target_task_name)
 
-        # Execute in topological order
-        for tname in sorter.static_order():
+        for tname in upstream_tasks:
             task = self.pipeline.get_task(tname)
             if force:
                 self.cache.clear(tname)
-            if hasattr(task, "run"):
-                task.run(**(kwargs if tname == target_task_name else {}))  # TODO Deprecate
-            else:
-                task.main(**(kwargs if tname == target_task_name else {}))
+            task.main()
+        
+        target_task.main(**kwargs)
+
+        for tname in downstream_tasks:
+            task = self.pipeline.get_task(tname)
+            if force:
+                self.cache.clear(tname)
+            task.main()
 
         return
 

@@ -93,9 +93,58 @@ class Pipeline:
                     except KeyError:
                         # Assume non-task dependencies are Result-dependencies
                         continue
-        for cls_name in TopologicalSorter(self._task_deps).static_order():
-            task: "Task" = self.get_task(cls_name)
+        for task_name in TopologicalSorter(self._task_deps).static_order():
+            task: "Task" = self.get_task(task_name)
             yield task
+
+    def get_upstream_tasks(self, task_name: str) -> list[str]:
+        """Return all upstream dependencies of `key` in topological order."""
+        if not self._task_deps:
+            _ = list(self.tasks)
+        ts = TopologicalSorter(self._task_deps)
+        order = list(ts.static_order())
+
+        visited = set()
+        stack = list(self._task_deps.get(task_name, []))
+
+        while stack:
+            node = stack.pop()
+            if node is None or node in visited:
+                continue
+            visited.add(node)
+            stack.extend(self._task_deps.get(node, []))
+
+        return [t for t in order if t in visited]
+
+    def get_downstream_tasks(self, task_name: str) -> list[str]:
+        """Return all tasks downstream of `task_name` and upstream of those."""
+        if not self._task_deps:
+            _ = list(self.tasks)
+
+        # Build a reverse graph: each node points to whoever depends on it
+        reverse: dict[str, list[str]] = {k: [] for k in self._task_deps}
+        for task, deps in self._task_deps.items():
+            for dep in deps:
+                if dep is not None:
+                    reverse.setdefault(dep, []).append(task)
+
+        ts = TopologicalSorter(self._task_deps)
+        order = list(ts.static_order())
+
+        visited = set()
+        stack = list(reverse.get(task_name, []))
+
+        while stack:
+            node = stack.pop()
+            if node == task_name or node in visited:
+                continue
+            visited.add(node)
+            # keep walking downstream...
+            stack.extend(reverse.get(node, []))
+            # ...and pull in whatever this downstream task itself depends on
+            stack.extend(self._task_deps.get(node, []))
+
+        return [t for t in order if t in visited]
 
     def add(self, *tasks: "Task") -> None:
         """Add Tasks to the Pipeline."""
