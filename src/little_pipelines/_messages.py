@@ -6,12 +6,14 @@ from rich.console import Console
 
 
 class Message():
-    def __init__(self, spaces=1):
+    def __init__(self, spaces=1, quiet=False):
         self.console = Console()
+        self.console.quiet = quiet
         self._spaces = spaces + 1
         self._time_fmt = "%Y-%m-%d %H:%M:%S.%f"
         self._time_color = "bright_black"
         self.last_task = ""
+        self._quiet: bool = quiet
 
     @property
     def time(self):

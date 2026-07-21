@@ -301,99 +301,6 @@ class Task:
     # ========================================================================
     # Decorators
 
-    # TODO: Legacy
-    def __process_old(self, func: Callable) -> None:
-        """Wrapper for custom functions."""
-        @wraps(func)
-        def _process_wrapper(*args, **kwargs) -> None:
-            """This code wraps around and executes the wrapped function."""
-            
-            # ----------------------------------------------------------------
-            # Pre-function call
-            # ----------------------------------------------------------------
-            # Start the process timer
-            _start = perf_counter_ns()
-
-            # Get the wrapped function's name
-            func_name: str = func.__name__
-
-            # Set cache-related vars
-            cached_result: Any|None = None
-
-            if func_name == "run":  #  and has_pipeline
-                # Print task-start message
-                self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
-                # ------------------------------------------------------
-                # Check if cached data
-                if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
-                    with self.message.console.status(f"{self.name}: Checking cache..."):
-                        # Attempt to get previously cached results
-                        result_obj: Result = self.cache.get(self.name)
-                    cached_result: Any|None = self.cache_read_callback(result_obj)
-                    if cached_result is not None:
-                        self.message.write(
-                            self.name,
-                            f"Loaded cached result ({type(cached_result).__name__})",
-                            **msg.WARN
-                        )
-                        self.is_skipped = True
-                elif self.cache is None:
-                    self.message.write(self.name, "No Cache set", **msg.WARN)
-            else:
-                # Print process-start message for each non-"run" function
-                self.message.write(self.name, f"Running {func_name}...", **msg.PROCESS_START)
-
-            # ----------------------------------------------------------------
-            # Wrapped function call
-            # ----------------------------------------------------------------
-            if func_name == "run":
-                if cached_result is not None:
-                    result = cached_result
-                else:
-                    result = func(self, *args, **kwargs)
-            else:
-                with self.message.console.status(f"{self.name}: Running {func_name}..."):
-                    result = func(self, *args, **kwargs)
-
-            # ----------------------------------------------------------------
-            # Post-function call
-            # ----------------------------------------------------------------
-            # Cache results, if not already cached and if a cache was set
-            if func_name == "run" and cached_result is None:  # Don't re-cache
-                try:
-                    with self.message.console.status(f"{self.name}: Caching result..."):
-                        # Process extras
-                        extra = None
-                        if hasattr(self, "extra"):
-                            extra = self.extra
-                        self.cache.set(self.name, result, extra)
-                except Exception as e:
-                    self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
-                    self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
-
-            # Sum the process duration
-            _time = util.time_diff(_start, perf_counter_ns())
-            _time_msg = f"(completed in {_time})"
-            self._process_times.append((func_name, _time))
-
-            if func_name == "run":
-                if cached_result is not None:
-                    # Print "DONE" in grey if cached data was used
-                    self.message.write(self.name, _time_msg, **msg.PROCESS_COMPLETE)
-                else:
-                    # Print "DONE" in green
-                    self._executed = True
-                    self.message.write(self.name, _time_msg, **msg.TASK_COMPLETE)
-            else:
-                self.message.write(self.name, _time_msg, **msg.PROCESS_COMPLETE)
-            return result
-
-        # Register the custom process with the Task
-        setattr(self, func.__name__, _process_wrapper)
-        return
-
-    # ========================
-    # TODO: new version (WIP)
     @contextmanager
     def _timed(self, func_name: str, complete_kind: dict):
         """Times a block, records it, and prints the completion message."""
@@ -401,8 +308,7 @@ class Task:
         yield
         _time = util.time_diff(_start, perf_counter_ns())
         self._process_times.append((func_name, _time))
-        if self._executed:
-            self.message.write(self.name, f"(completed in {_time})", **complete_kind)
+        self.message.write(self.name, f"(completed in {_time})", **complete_kind)
 
     def process(self, func: Callable) -> None:
         """Wrapper for method-like custom functions."""
@@ -419,27 +325,37 @@ class Task:
 
     def _load_cached_result(self) -> Result|None:
         """Checks for cached data"""
+        if self.cache is None:
+            self.message.write(self.name, "No Cache set", **msg.WARN)
+            return None
+
         if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
             with self.message.console.status(f"{self.name}: Checking cache..."):
                 # Attempt to get previously cached results
-                result_obj: Result = self.cache.get(self.name)
-            try:
-                cached_result: Any|None = self.cache_read_callback(result_obj)
-                if cached_result is not None:
-                    self.message.write(
-                        self.name,
-                        f"Loaded cached result ({type(cached_result).__name__})",
-                        **msg.WARN
-                    )
-                    self.is_skipped = True
-                    # TODO: we need to return a tuple[Result] if there are multiple results related to TaskName
-                    return cached_result
-            except Exception as e:  # TODO:
-                print("Couldn't load cached data")
-                print(e)
+                result_objs: list[Result] = self.cache.get(task_name=self.name)
+            if result_objs:
+                self.message.write(
+                    self.name,
+                    f"Loaded cached result(s)",
+                    **msg.WARN
+                )
+                return tuple([r.data for r in result_objs])
+            # TODO: reimplement
+            # try:
+            #     cached_result: Any|None = self.cache_read_callback(result_obj)
+            #     if cached_result is not None:
+            #         self.message.write(
+            #             self.name,
+            #             f"Loaded cached result ({type(cached_result).__name__})",
+            #             **msg.WARN
+            #         )
+            #         self.is_skipped = True
+            #         # TODO: we need to return a tuple[Result] if there are multiple results related to TaskName
+            #         return cached_result
+            # except Exception as e:  # TODO:
+            #     print("Couldn't load cached data")
+            #     print(e)
 
-        elif self.cache is None:
-            self.message.write(self.name, "No Cache set", **msg.WARN)
         return None
 
     def _process_results(self, results) -> list[Any]:
@@ -465,7 +381,6 @@ class Task:
 
         return return_data
 
-
     def main(self, func: Callable) -> None:
         """Wraps the task's user-defined 'main' function."""
         @wraps(func)
@@ -473,6 +388,13 @@ class Task:
             self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
 
             with self._timed(func.__name__, msg.TASK_COMPLETE):
+                # Attempt to get cached data
+                if self.use_cached_results:
+                    r = self._load_cached_result()
+                    if r is not None:
+                        #self._skipped = True  # TODO: is this skipping?
+                        return r
+
                 # Run the main function
                 try:
                     raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
@@ -490,14 +412,14 @@ class Task:
                     results = raw_results
 
                 return_data = self._process_results(results)
-            self._executed = True
+                self._executed = True
 
-            return (
-                # Return the single instance of original data
-                return_data[0] if len(return_data) == 1
-                # Or a tuple if many
-                else tuple(return_data)
-            )
+                return (
+                    # Return the single instance of original data
+                    return_data[0] if len(return_data) == 1
+                    # Or a tuple if many
+                    else tuple(return_data)
+                )
 
         setattr(self, "main", _main_wrapper)
         return

@@ -332,15 +332,6 @@ class Shell(Cmd):
         return
 
     # ========================================================================
-    def do_reload(self, inp: Optional[str] = "") -> None:
-        """Reload task definitions from source code (re-import tasks)."""
-        task_name = inp.split()[0]
-        self.pipeline.reload_tasks(task_name)
-        self.cache.clear(task_name)
-        self.message.write(msg=f"Reloaded script: {task_name}", **msg.SHELL)
-        return
-
-    # ========================================================================
     # Execution
     @staticmethod
     def _get_skipped(inputs: list[str]) -> bool:
@@ -362,8 +353,8 @@ class Shell(Cmd):
     def _execute(self, inp: str) -> None:
         """
         Execute each Task in the Pipeline.
-        If a single task is specified, tasks dependent on it are also executed.
-        
+        If a single task is specified, upstream and downstream tasks may also be executed.
+
         Args:
             --force: Deletes the cache before executing the pipeline
             --no-upstream: Does not execute upstream tasks. Only used when one task is specified.
@@ -373,52 +364,22 @@ class Shell(Cmd):
         force: bool = ("--force" in inputs)
         upstream: bool = not ("--no-upstream" in inputs)  # Default True
         downstream: bool = not ("--no-downstream" in inputs)  # Default True
+        quiet: bool = ("--quiet" in inputs or "-q" in inputs)  # Default False
         target_task_name = inputs[0]
         kwargs = self._clean_kwargs(inputs)
         # Process all tasks
         if target_task_name == ".":
             skipped_tasks: list[str] = self._get_skipped(inputs)
-            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)  # TODO: kwargs?
+            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks, quiet=quiet)  # TODO: kwargs?
             return
 
-        self._execute_single_task(target_task_name, force=force, upstream=upstream, downstream=downstream, **kwargs)
-        return
-
-    def _execute_single_task(self, target_task_name: str, *, force: bool, upstream: bool, downstream: bool, **kwargs) -> None:
-        """Execute a single task, optionally including upstream and/or downstream tasks."""    
-        if target_task_name not in self.pipeline.list_tasks():
-            raise KeyError(f"No such task: '{target_task_name}'")
-
-        target_task = self.pipeline.get_task(target_task_name)
-
-        upstream_tasks = []
-        if upstream:
-            upstream_tasks = self.pipeline.get_upstream_tasks(target_task_name)
-        
-        downstream_tasks = []
-        if downstream:
-            downstream_tasks = self.pipeline.get_downstream_tasks(target_task_name)
-
-        for tname in upstream_tasks:
-            task = self.pipeline.get_task(tname)
-            if force:
-                self.cache.clear(tname)
-            task.main()
-        
-        target_task.main(**kwargs)
-
-        for tname in downstream_tasks:
-            task = self.pipeline.get_task(tname)
-            if force:
-                self.cache.clear(tname)
-            task.main()
-
+        self.pipeline.execute_one(target_task_name, force=force, upstream=upstream, downstream=downstream, quiet=quiet, **kwargs)
         return
 
     #@app_logger.catch
     def do_execute(self, inp):
         """Execute each Task in the Pipeline.
-        
+
         Args:
             --force: Clears cached results, thereby causing all Tasks to execute
             --skip: Flag a Task name to be skipped

@@ -42,6 +42,7 @@ class Pipeline:
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
+        self._quiet = True  # Default True here, shell defaults to False
 
         # Registry of task:dependencies
         self._task_deps: dict[str, list[str]] = {}
@@ -77,7 +78,7 @@ class Pipeline:
             except Exception as e:  # KeyError, but why not everything
                 pass
         msg_len = max(lens)
-        return msg.Message(msg_len)
+        return msg.Message(msg_len, self._quiet)
 
     @property
     def tasks(self) -> Generator["Task"]:
@@ -149,6 +150,7 @@ class Pipeline:
     def add(self, *tasks: "Task") -> None:
         """Add Tasks to the Pipeline."""
         for task in tasks:
+            # Relate the pipeline to the task
             task.pipeline = self
             self._tasks.append(task)
         return
@@ -231,7 +233,7 @@ class Pipeline:
         force_all = False,
         force_tasks: Optional[list[str]] = None,
         skip_tasks: Optional[list[str]] = None,
-        single_task: str = "",
+        quiet: bool = True,
     ) -> None:
         """
         Execute the pipeline.
@@ -248,6 +250,9 @@ class Pipeline:
         nexec = 0
         nfail = 0
 
+        # Silence messages # TODO: WIP
+        self._quiet = quiet
+
         # Validate all tasks have run methods
         self.validate_tasks()
 
@@ -255,11 +260,6 @@ class Pipeline:
         tasks = list(self.tasks)
         ntasks = len([t for t in tasks if not t.manual_execution_only])
         manual_tasks = len([t for t in tasks if t.manual_execution_only])
-
-        # TODO: Support execution of only one task, optionally without executing upstream dependencies
-        if single_task:
-            tasks = [t for t in self.tasks if t.name == single_task]
-            # TODO: upstream deps
 
         for task in tasks:
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
@@ -317,6 +317,58 @@ class Pipeline:
         if nfail > 0:
             self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
         self.message.console.rule()
+
+        return
+
+    def execute_one(
+        self,
+        task_name: str,
+        force: bool = False,
+        upstream: bool = True,
+        downstream: bool = True,
+        quiet: bool = True,
+        **kwargs
+    ):
+        """
+        Executes a single task (optionally including upstream and/or downstream tasks).
+
+        Args:
+            task_name (str): The name of the target task to execute
+            force (bool): False will pull cached data; True forces execution
+            upstream (bool): Execute upstream tasks (and their dependencies)
+            downstream (bool): Execute downstream tasks (and their dependencies)
+            quiet (bool): Silences printed messages (default False)
+        """
+        # Silence messages # TODO: WIP
+        self._quiet = quiet
+
+        target_task = self.get_task(task_name)
+        if force:
+            self.cache.clear(task_name)
+
+        upstream_tasks = []
+        if upstream:
+            upstream_tasks = self.get_upstream_tasks(task_name)
+        
+        downstream_tasks = []
+        if downstream:
+            downstream_tasks = self.get_downstream_tasks(task_name)
+
+        for tname in upstream_tasks:
+            task = self.get_task(tname)
+            if force:
+                self.cache.clear(tname)
+            task.main()
+        
+        target_task.main(**kwargs)
+
+        for tname in downstream_tasks:
+            task = self.get_task(tname)
+            if force:
+                self.cache.clear(tname)
+            task.main()
+
+        # TODO: make it look like the printed results of `execute`
 
         return
 
