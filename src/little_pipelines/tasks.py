@@ -92,6 +92,7 @@ class Task:
         self._process_times = []
         self._executed = False
         self._skipped = False
+        self._has_errors = False
 
         # Overridables
         self._cache_read_callback = self._default_cache_read_callback
@@ -104,6 +105,8 @@ class Task:
 
         # Pipeline
         self._pipeline: Optional["Pipeline"] = None
+        self._quiet = True  # Task-specific
+        self._raise_errors = True
         # Initialize the cache stuff ....
         self.cache: Cache = cache
         self.use_cached_results = use_cached_results
@@ -163,7 +166,7 @@ class Task:
         if self.pipeline:
             # This essentially gets the longest task name; handles errors
             return self.pipeline.message
-        return msg.Message(len(self.name))
+        return msg.Message(len(self.name), self._quiet)
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
@@ -308,7 +311,9 @@ class Task:
         yield
         _time = util.time_diff(_start, perf_counter_ns())
         self._process_times.append((func_name, _time))
-        self.message.write(self.name, f"(completed in {_time})", **complete_kind)
+        if not self._has_errors:
+            self.message.write(self.name, f"(completed in {_time})", **complete_kind)
+        return
 
     def process(self, func: Callable) -> None:
         """Wrapper for method-like custom functions."""
@@ -382,14 +387,51 @@ class Task:
         return return_data
 
     def main(self, func: Callable) -> None:
-        """Wraps the task's user-defined 'main' function."""
+        """
+        Wraps the task's user-defined 'main' function.
+
+        kwargs that can be passed to the user-function:
+            force (bool): Force the execution of the task (default True)
+            quiet (bool): 
+            raise_errors (bool): 
+        """
         @wraps(func)
         def _main_wrapper(*args, **kwargs) -> Any:
+            """Little Pipelines' secret sauce."""
+            kwargs_allowed = [
+                "force",
+                "quiet",
+                "raise_errors",
+            ]
             self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
+
+            # Process / handle kwargs
+            # NOTE: these options are mostly for use within a shell
+            # Force execution of a task
+            force: bool = kwargs.get("force", True)
+            if force not in (True, False):
+                raise AttributeError("'force' kwarg must be bool")
+            # Optionally quiet a task
+            quiet: bool = kwargs.get("quiet", True)
+            if quiet not in (True, False):
+                raise AttributeError("'quiet' kwarg must be bool")
+            if quiet != self._quiet:
+                self._quiet = quiet
+            # Ignoring errors allows the pipeline to continue running if some tasks failvvcccbkbkfujevgkcddejiteitbicitduvfjrutlkdeb
+
+            raise_errors: bool = kwargs.get("raise_errors", True)
+            if raise_errors not in (True, False):
+                raise AttributeError("'raise_errors' kwarg must be bool")
+            if raise_errors != self._raise_errors:
+                self._raise_errors = raise_errors
+
+            # Clean kwargs
+            kwargs: dict = {k: v for k, v in kwargs.items() if k not in kwargs_allowed}
 
             with self._timed(func.__name__, msg.TASK_COMPLETE):
                 # Attempt to get cached data
-                if self.use_cached_results:
+                #if self.use_cached_results:
+                if force is False:
                     r = self._load_cached_result()
                     if r is not None:
                         #self._skipped = True  # TODO: is this skipping?
@@ -399,9 +441,13 @@ class Task:
                 try:
                     raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
+                    self._has_errors = True
+                    if raise_errors is True:
+                        raise e
                     self.message.write(self.name, msg=f"Failed to run function 'main/{func.__name__}'", **msg.FAIL)
                     self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
                     return
+
 
                 # Cache the results
                 # TODO: if not use_cache...
