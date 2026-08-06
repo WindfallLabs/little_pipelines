@@ -3,10 +3,10 @@ Tasks
 """
 
 import datetime as dt
+import inspect
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from inspect import currentframe
 from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
@@ -63,9 +63,12 @@ class Task:
     def __init__(
         self: Self,
         name: str,
-        dependencies: Optional[list[str]] = None,
-        if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
         cache: Optional[Cache] = None,
+        dependencies: Optional[list[str]] = None,
+
+        # TODO: WIP parameters
+        outputs: Optional[dict[str, type]] = None,
+        if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
         result_expiry: Optional[dt.datetime|dt.date] = None,
         use_cached_results: bool = True,
         manual_execution_only: bool = False,
@@ -84,6 +87,13 @@ class Task:
         self._name: str = name
         self._dependency_names: frozenset[str] = frozenset(dependencies) if dependencies else set()
         self._dependencies: Optional[dict[str, Any]] = None
+
+        if outputs is not None and not all(isinstance(k, str) for k in outputs.keys()):
+            raise AttributeError
+        self.outputs = {self._name: Any}
+        if outputs:
+            self.outputs = outputs
+
         self.if_upstream_errors = if_upstream_errors
 
         # Flags for pipeline
@@ -98,9 +108,11 @@ class Task:
         self._cache_read_callback = self._default_cache_read_callback
 
         # Inspection
-        # TODO: make method?
-        self._g = currentframe().f_back.f_globals
+        # The script the Task is initialized in
+        module = inspect.currentframe().f_back
+        self._g = module.f_globals
         # Get the filepath of the instance's script
+        self._script = inspect.getmodule(module)
         self._script_path = self._g.get('__file__')
 
         # Pipeline
@@ -264,29 +276,7 @@ class Task:
         """
         return (self._g.get("__doc__"), _autodoc(self))
 
-    # TODO: deprecate; replace uses with `task.get_dependency("TASK").get_result()`
-    def __get_dependency_result(self, task_name: str, check_dependency=True):
-        """
-        Gets another Task's cached result(s).
-        
-        Args:
-            task_name (str): The name of the Task's data to retrieve
-            check_dependency (bool): A safety measure to ensure the retrieved data is a dependency
-                i.e. The data exists before the calling Task
-        """
-        # Ensure the accessed task is a dependency
-        if task_name in self._dependency_names or check_dependency is False:
-            if self.cache is not None:
-                try:
-                    return self.cache.get(task_name)[0].data
-                except KeyError as e:
-                    raise e  # TODO: execute dependency?
-            else:
-                raise AttributeError(f"{self.name} task has no cache set")
-        raise KeyError(f"{task_name} is not a dependency of {self.name}")
-
     # TODO: rename to _get_task and allow it to get tasks outside of dependencies
-    # There's no reason a user should be manipulating tasks from another task
     def get_dependency(self, task_name: str) -> "Task":
         """
         Gets a dependency (Task object).

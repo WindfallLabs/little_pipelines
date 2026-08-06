@@ -4,7 +4,11 @@ Pipeline
 
 # BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
 
+import importlib
+import inspect
+import sys
 from graphlib import TopologicalSorter
+from inspect import currentframe
 from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
@@ -51,6 +55,9 @@ class Pipeline:
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
         self._on_fail: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
 
+        # The script the Pipeline is initialized in
+        self._script = inspect.getmodule(inspect.currentframe().f_back)
+
     @property
     def is_complete(self) -> bool:
         """If all Pipeline Tasks have been completed."""
@@ -87,11 +94,12 @@ class Pipeline:
             for task in self._tasks:
                 self._task_deps[task.name] = []
                 for dep_name in task._dependency_names:
+                    # dep_name might be a task-name or a named-result
                     try:
                         # Find Task-dependencies
                         _ = self.get_task(dep_name)
                         self._task_deps[task.name].append(dep_name)
-                    except KeyError:
+                    except KeyError:  # TODO: remove this; let'r raise errors!
                         # Assume non-task dependencies are Result-dependencies
                         continue
         for task_name in TopologicalSorter(self._task_deps).static_order():
@@ -196,20 +204,34 @@ class Pipeline:
 
     def get_task(self, task_name: str):
         """Gets a task by name."""
+        # Dict of task-name: Task
         task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
+        # Add result-name: Task
+        task_lookup.update({k: task for task in self._tasks for k in task.outputs.keys()})
         try:
             t = task_lookup[task_name]
             return t
         except KeyError:
             raise KeyError(f"No such task: {task_name}")
 
+    def reload_task(self, task_name: str|None = None) -> None:
+        """Reload one or all tasks and then reload the pipeline script."""
+        if task_name:
+            task = self.get_task(task_name)
+            importlib.reload(task._script)
+        else:
+            for task in self.tasks:
+                importlib.reload(task._script)
+        importlib.reload(self._script)
+        return
+
     def validate_tasks(self):
         """Pre-flight checks."""
         run_errors: list[str] = []
 
-        # Check if task has main or run method (required)
+        # Check if task has a user-defined main method (required)
         for task in self._tasks:  # Unsorted
-            if not hasattr(task, "main") and not hasattr(task, "run"):  # TODO: deprecate 'run'
+            if not hasattr(task, "main"):
                 run_errors.append(task.name)
 
         # Check if task dependencies are imported
@@ -233,6 +255,7 @@ class Pipeline:
         force_all = False,
         force_tasks: Optional[list[str]] = None,
         skip_tasks: Optional[list[str]] = None,
+        raise_errors: bool = True,
         quiet: bool = True,
     ) -> None:
         """
@@ -244,9 +267,9 @@ class Pipeline:
         _start = perf_counter_ns()
 
         if not force_tasks:
-            force_tasks = []
+            force_tasks = []  # TODO: deprecate (set this at the task-level)
         if not skip_tasks:
-            skip_tasks = []
+            skip_tasks = []  # TODO: deprecate (set this at the task-level)
         nexec = 0
         nfail = 0
 
@@ -285,10 +308,8 @@ class Pipeline:
                     continue
 
                 # Execute
-                if hasattr(task, "run"):  # TODO: deprecate
-                    result: Any = task.run()
-                else:
-                    result: Any = task.main()
+                result: Any = task.main(raise_errors=raise_errors, quiet=quiet)
+                # TODO: type-check the expected result with the actual using task.outputs
                 if result is None:
                     self.message.write(task.name, "Result is None", **msg.WARN)
                 nexec += 1

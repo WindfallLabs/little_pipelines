@@ -34,26 +34,18 @@ def test_multiple_results(task):
     assert results[1] == 2
 
 
-def test_unique_task_names(task):
-    #task.main()
-    #assert task._executed is True
+def test_unique_task_names(cache):
+    task = Task("Multi-Result Test", cache=cache)
 
-    task = Task(
-        "Multi-Result Test",
-        cache=cache
-    )
+    @task.main
+    def main(t: Task):
+        return (
+            t.result(1, "One"),
+            t.result(1, "One"),  # duplicate name — should raise
+        )
 
     with pytest.raises(ValueError):
-        #task.result(1, "One")
-
-        @task.main
-        def main(t: Task):
-            """Return two Results"""
-            return (
-                t.result(1, "One"),
-                t.result(1, "One")
-            )
-
+        task.main()
 
 
 def test_repeat_results(task):

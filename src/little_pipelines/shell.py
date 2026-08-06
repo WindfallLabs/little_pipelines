@@ -1,6 +1,7 @@
 """
 Little Pipelines Shell
 """
+
 import os
 import re
 from cmd import Cmd
@@ -168,6 +169,14 @@ class Shell(Cmd):
     def do_quiet(self, inp):
         """Greatly reduces message output. Sets logging level to ERROR."""
         self.do_log("ERROR")
+        return
+
+    # ========================================================================
+    # Reloading
+    
+    def do_reload(self, inp: str):
+        """Reload tasks."""
+        self.pipeline.reload_task()
         return
 
     # ========================================================================
