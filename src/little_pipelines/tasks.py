@@ -353,7 +353,7 @@ class Task:
 
         return None
 
-    def _process_results(self, results) -> list[Any]:
+    def _cache_and_return_results(self, results) -> list[Any]:
         """Handles return values as Results and puts them in the Cache."""
         #if not self.cache: ...  # TODO:
         return_data: list[Any] = []
@@ -447,7 +447,7 @@ class Task:
                 else:
                     results = raw_results
 
-                return_data = self._process_results(results)
+                return_data = self._cache_and_return_results(results)
                 self._executed = True
 
                 return (
