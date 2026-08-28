@@ -43,9 +43,8 @@ class Shell(Cmd):
 
     @property
     def message(self):
-        if self.pipeline is None:
-            print("Bad")
-        return self.pipeline.message
+        #return self.pipeline.message
+        return msg.Message(None, self.pipeline._spacing or 14)
 
     # ========================================================================
     # Exit and aliases

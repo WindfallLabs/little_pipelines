@@ -22,17 +22,18 @@ class Message():
         return t
 
     def write(self, task: str = "", msg: str = "", level: str = "INFO", task_color="grey", level_color="grey", msg_color="grey"):
-        if self.pipeline is None:
-            self.console.print("No pipeline")
-            return
         msg = str(msg)
         self.last_task = task
         _time = f"[{self._time_color}][{self.time}][/]"
         _task = "  " + f"[{task_color}]" + task.ljust(self._spaces) + "[/]"
         _level = f"[{level_color}]" + " :" + level.center(6) + ": " + "[/]"
         _msg = f"[{msg_color}]" + msg + "[/]"
+        out = _time + _task + _level + _msg
+        if self.pipeline is None:
+            self.console.print(out)
+            return
         # Pipelines handle the message queue, without a pipeline, no messages are printed
-        self.pipeline._msg_queue.put(_time + _task + _level + _msg)  # new
+        self.pipeline._msg_queue.put(out)
         return
 
 
