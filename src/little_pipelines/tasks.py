@@ -178,7 +178,7 @@ class Task:
         if self.pipeline:
             # This essentially gets the longest task name; handles errors
             return self.pipeline.message
-        return msg.Message(len(self.name), self._quiet)
+        return msg.Message(None, len(self.name), self._quiet)
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
@@ -374,6 +374,7 @@ class Task:
                 self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
             return_data.append(result.data)
 
+        # Return the data as returned by main()
         return return_data
 
     def main(self, func: Callable) -> None:
@@ -437,7 +438,6 @@ class Task:
                     self.message.write(self.name, msg=f"Failed to run function 'main/{func.__name__}'", **msg.FAIL)
                     self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
                     return
-
 
                 # Cache the results
                 # TODO: if not use_cache...

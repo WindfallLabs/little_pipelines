@@ -7,8 +7,10 @@ Pipeline
 import importlib
 import inspect
 import sys
+import threading
 from graphlib import TopologicalSorter
 from inspect import currentframe
+from queue import SimpleQueue
 from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
@@ -50,6 +52,10 @@ class Pipeline:
 
         # Registry of task:dependencies
         self._task_deps: dict[str, list[str]] = {}
+        # Message queue
+        self._msg_queue = SimpleQueue()
+        self._msg_handler_thread: Optional[threading.Thread] = None
+        self._spacing: Optional[int] = None
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -78,14 +84,35 @@ class Pipeline:
     @property
     def message(self) -> msg.Message:
         """Handle writing to the console."""
-        lens = [6]  # Default minimum; no need to expose to users
-        for t in self.tasks:
-            try:
-                lens.append(len(t.name))
-            except Exception as e:  # KeyError, but why not everything
-                pass
-        msg_len = max(lens)
-        return msg.Message(msg_len, self._quiet)
+        if self._spacing is None:
+            lens = [6]  # Default minimum; no need to expose to users
+            for t in self.tasks:
+                try:
+                    lens.append(len(t.name))
+                except Exception as e:  # KeyError, but why not everything
+                    pass
+            #msg_len = max(lens)
+            self._spacing = max(lens)
+        return msg.Message(self, spaces=self._spacing, quiet=self._quiet)
+
+    def _msg_handler(self):
+        while True:
+            msg = self._msg_queue.get()  # waits/blocks
+            if msg is None:  # None is the sentinel
+                break
+            self.message.console.print(msg)
+
+    def _start_msg_thread(self) -> None:
+        self._msg_handler_thread = threading.Thread(target=self._msg_handler, daemon=True)
+        self._msg_handler_thread.start()
+        self.message.write("Pipeline", "Preparing Tasks...", **msg.PROCESS_START)
+        return
+
+    def _stop_msg_thread(self) -> None:
+        #self.message.write("Done")
+        self._msg_queue.put(None)
+        self._msg_handler_thread.join()
+        return
 
     @property
     def tasks(self) -> Generator["Task"]:
@@ -266,6 +293,9 @@ class Pipeline:
         """
         _start = perf_counter_ns()
 
+        # Handle message queue
+        self._start_msg_thread()
+
         if not force_tasks:
             force_tasks = []  # TODO: deprecate (set this at the task-level)
         if not skip_tasks:
@@ -284,7 +314,10 @@ class Pipeline:
         ntasks = len([t for t in tasks if not t.manual_execution_only])
         manual_tasks = len([t for t in tasks if t.manual_execution_only])
 
+        self.message.write("Pipeline", "Executing Tasks...", **msg.PROCESS_START)
+
         for task in tasks:
+            self.message.write(f"Starting {task.name}...")
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
                 #task.is_skipped = True  # TODO: this makes sense right?
@@ -339,6 +372,9 @@ class Pipeline:
             self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
         self.message.console.rule()
 
+        # Final flush of message queue
+        self._stop_msg_thread()
+
         return
 
     def execute_one(
@@ -360,6 +396,11 @@ class Pipeline:
             downstream (bool): Execute downstream tasks (and their dependencies)
             quiet (bool): Silences printed messages (default False)
         """
+        _start = perf_counter_ns()
+
+        # Message queue
+        self._start_msg_thread()
+
         # Silence messages # TODO: WIP
         self._quiet = quiet
 
@@ -375,21 +416,32 @@ class Pipeline:
         if downstream:
             downstream_tasks = self.get_downstream_tasks(task_name)
 
+        _t = util.time_diff(_start, perf_counter_ns())
+        self.message.write("Pipeline", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
+        self.message.write("Pipeline", "Executing Tasks...", **msg.PROCESS_START)
+        nexec = 0
         for tname in upstream_tasks:
             task = self.get_task(tname)
             if force:
                 self.cache.clear(tname)
             task.main()
+            nexec += 1
         
         target_task.main(**kwargs)
+        nexec += 1
 
         for tname in downstream_tasks:
             task = self.get_task(tname)
             if force:
                 self.cache.clear(tname)
             task.main()
+            nexec += 1
 
-        # TODO: make it look like the printed results of `execute`
+        _time = util.time_diff(_start, perf_counter_ns())
+        ntasks = nexec
+        self.message.write("Tasks Completed", f"Ran {nexec}/{ntasks} tasks in {_time}", **msg.PIPELINE_COMPLETE)
+        # Final flush of message queue
+        self._stop_msg_thread()
 
         return
 

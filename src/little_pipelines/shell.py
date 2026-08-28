@@ -43,6 +43,8 @@ class Shell(Cmd):
 
     @property
     def message(self):
+        if self.pipeline is None:
+            print("Bad")
         return self.pipeline.message
 
     # ========================================================================

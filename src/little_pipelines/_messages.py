@@ -6,9 +6,10 @@ from rich.console import Console
 
 
 class Message():
-    def __init__(self, spaces=1, quiet=False):
+    def __init__(self, pipeline, spaces=1, quiet=False):
         self.console = Console()
         self.console.quiet = quiet
+        self.pipeline = pipeline
         self._spaces = spaces + 1
         self._time_fmt = "%Y-%m-%d %H:%M:%S.%f"
         self._time_color = "bright_black"
@@ -21,13 +22,17 @@ class Message():
         return t
 
     def write(self, task: str = "", msg: str = "", level: str = "INFO", task_color="grey", level_color="grey", msg_color="grey"):
+        if self.pipeline is None:
+            self.console.print("No pipeline")
+            return
         msg = str(msg)
         self.last_task = task
         _time = f"[{self._time_color}][{self.time}][/]"
         _task = "  " + f"[{task_color}]" + task.ljust(self._spaces) + "[/]"
         _level = f"[{level_color}]" + " :" + level.center(6) + ": " + "[/]"
         _msg = f"[{msg_color}]" + msg + "[/]"
-        self.console.print(_time + _task + _level + _msg)
+        # Pipelines handle the message queue, without a pipeline, no messages are printed
+        self.pipeline._msg_queue.put(_time + _task + _level + _msg)  # new
         return
 
 
@@ -120,7 +125,7 @@ tasks = [
 
 
 def test():
-    m = Message(max([len(i) for i in tasks]))
+    m = Message(None, max([len(i) for i in tasks]))
 
     task = tasks[0]
     m.write(task, **START)  # Start task
