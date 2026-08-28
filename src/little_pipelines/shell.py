@@ -43,7 +43,6 @@ class Shell(Cmd):
 
     @property
     def message(self):
-        #return self.pipeline.message
         return msg.Message(None, self.pipeline._spacing or 14)
 
     # ========================================================================

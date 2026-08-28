@@ -1,4 +1,6 @@
-
+"""
+Message formatter.
+"""
 
 import datetime as dt
 
