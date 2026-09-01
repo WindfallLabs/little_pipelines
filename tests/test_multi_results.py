@@ -1,4 +1,5 @@
 import pytest
+import sqlite3
 
 from little_pipelines import Cache, Task
 
@@ -18,11 +19,9 @@ def task(cache):
     @task.main
     def main(t: Task):
         """Return two Results"""
-        one = 1
-        two = 2
         return (
-            t.result(one, "One"),
-            t.result(two, "Two")
+            t.result(1, "One"),
+            t.result(2, "Two")
         )
     
     return task
@@ -41,10 +40,11 @@ def test_unique_task_names(cache):
     def main(t: Task):
         return (
             t.result(1, "One"),
-            t.result(1, "One"),  # duplicate name — should raise
+            t.result(2, "One"),  # duplicate name -- should raise
         )
 
     with pytest.raises(ValueError):
+    #with pytest.raises(sqlite3.IntegrityError):
         task.main()
 
 

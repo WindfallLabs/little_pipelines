@@ -4,7 +4,7 @@ Tasks
 
 import datetime as dt
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from time import perf_counter_ns
@@ -156,7 +156,7 @@ class Task:
 
     @property
     def is_executed(self) -> bool:
-        return self._executed
+        return self._executed and not self._has_errors
 
     @property
     def is_skipped(self):
@@ -215,33 +215,23 @@ class Task:
     #         return self.pipeline.logger
     #     return self._logger
 
-    # @property  # TODO: remove??
-    # def result(self) -> Any:
-    #     """Accessor for the Task's result(s)."""
-    #     return self.cache.get(self.name).data
-
-    def result(self, data: Any, name: Optional[str] = None) -> Result:
-        """Creates a Result object."""
-        # The default result name is the same as the task
+    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: consider fulfilling a Data object instead
+        """
+        Creates a Result object.
+        """
+        # If none, the result name is set to the task name
         if not name:
             name = self.name
-        if name in self._result_names:
-            if self._executed:
-                # If the task is executed multiple times
-                return self.results[name]
-            else:
-                # If a result is set with a non-unique name
-                raise ValueError(f"This task already returns a result with name '{name}'")
+
         r = Result(
             name=name,
-            task=self.name,
             data=data,
+            task_name=self.name,
             # TODO: expiry and extra
         )
-        self._result_names.add(name)
         return r
 
-    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|Result:
+    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|Result:  # TODO: deprecate?
         """
         Gets the Task's result(s).
 
@@ -294,7 +284,7 @@ class Task:
     # ========================================================================
     # Decorators
 
-    @contextmanager
+    @contextmanager  # TODO: replace with util.Timer or better, util.process_timer
     def _timed(self, func_name: str, complete_kind: dict):
         """Times a block, records it, and prints the completion message."""
         _start = perf_counter_ns()
@@ -318,63 +308,64 @@ class Task:
         setattr(self, func.__name__, _process_wrapper)
         return
 
-    def _load_cached_result(self) -> Result|None:
-        """Checks for cached data"""
+    def _load_cached_results(self) -> Any | tuple[Any]:  # TODO: or do we WANT the Result objects?
+        """
+        Returns all cached data for this task.
+        """
         if self.cache is None:
             self.message.write(self.name, "No Cache set", **msg.WARN)
-            return None
+            raise AttributeError("No cache set.")
 
-        if self.use_cached_results and self.cache is not None and self.name in self.cache.keys():
-            with self.message.console.status(f"{self.name}: Checking cache..."):
-                # Attempt to get previously cached results
-                result_objs: list[Result] = self.cache.get(task_name=self.name)
-            if result_objs:
-                self.message.write(
-                    self.name,
-                    f"Loaded cached result(s)",
-                    **msg.WARN
-                )
-                return tuple([r.data for r in result_objs])
-            # TODO: reimplement
-            # try:
-            #     cached_result: Any|None = self.cache_read_callback(result_obj)
-            #     if cached_result is not None:
-            #         self.message.write(
-            #             self.name,
-            #             f"Loaded cached result ({type(cached_result).__name__})",
-            #             **msg.WARN
-            #         )
-            #         self.is_skipped = True
-            #         # TODO: we need to return a tuple[Result] if there are multiple results related to TaskName
-            #         return cached_result
-            # except Exception as e:  # TODO:
-            #     print("Couldn't load cached data")
-            #     print(e)
+        results: tuple[Any] = tuple([r.data for r in self.cache.get(task_name=self.name)])
+        if len(results) == 1:
+            results: Any = results[0]
+        return results
 
-        return None
+    def _resultify(self, return_values: Any) -> tuple[Result]:
+        """
+        Forces the values returned by 'main' into a tuple of results.
+        """
+        # Handle single Result
+        if isinstance(return_values, Result):
+            if not return_values.task_name:
+                return_values.task_name = self.name
+            return (return_values,)
+        
+        # Handle Sequence (but not string)
+        if isinstance(return_values, Sequence) and not isinstance(return_values, str):
+            if not all(isinstance(item, Result) for item in return_values):
+                raise TypeError("Sequence must contain only Result objects")
+            return tuple(return_values)
+        
+        # Handle any other single value, and inherit task.name
+        return (Result(data=return_values, name=self.name, task_name=self.name),)
 
-    def _cache_and_return_results(self, results) -> list[Any]:
-        """Handles return values as Results and puts them in the Cache."""
-        #if not self.cache: ...  # TODO:
-        return_data: list[Any] = []
-        for r in results:
-            if isinstance(r, Result):
-                result: Result = r
-            # Assume single non-Result value
-            else:
-                result = Result(
-                    name=self.name,
-                    task=self.name,
-                    data=r,
-                )
+    def _cache_and_return_result_data(self, results: tuple[Result]) -> tuple[Any]:
+        """
+        Handles return values as Results and puts them in the Cache.
+        """
+        # Check result names for uniqueness
+        result_names: list[str] = [r.name for r in results]
+        if len(set(result_names)) != len(result_names):
+            raise ValueError("Multiple Results have the same name")
+
+        unpacked_data: list[Any] = []
+        return_data: Any | tuple[Any]
+        for result in results:
             try:
                 self.cache.put(result)
             except Exception as e:
+                self._has_errors = True
                 self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
                 self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
-            return_data.append(result.data)
+            unpacked_data.append(result.data)
 
-        # Return the data as returned by main()
+        # Return the contents of the tuple if there's only one  # TODO: good idea?
+        if len(unpacked_data) == 1:
+            return_data = unpacked_data[0]
+        else:
+            return_data = tuple(unpacked_data)
+
         return return_data
 
     def main(self, func: Callable) -> None:
@@ -387,7 +378,7 @@ class Task:
             raise_errors (bool): 
         """
         @wraps(func)
-        def _main_wrapper(*args, **kwargs) -> Any:
+        def _main_wrapper(*args, **kwargs) -> Any | tuple[Any]:
             """Little Pipelines' secret sauce."""
             kwargs_allowed = [
                 "force",
@@ -408,8 +399,7 @@ class Task:
                 raise AttributeError("'quiet' kwarg must be bool")
             if quiet != self._quiet:
                 self._quiet = quiet
-            # Ignoring errors allows the pipeline to continue running if some tasks failvvcccbkbkfujevgkcddejiteitbicitduvfjrutlkdeb
-
+            # Ignoring errors allows the pipeline to continue running if some tasks fail
             raise_errors: bool = kwargs.get("raise_errors", True)
             if raise_errors not in (True, False):
                 raise AttributeError("'raise_errors' kwarg must be bool")
@@ -423,39 +413,31 @@ class Task:
                 # Attempt to get cached data
                 #if self.use_cached_results:
                 if force is False:
-                    r = self._load_cached_result()
+                    r: tuple[Result] = self._load_cached_results()
                     if r is not None:
                         #self._skipped = True  # TODO: is this skipping?
                         return r
 
                 # Run the main function
                 try:
-                    raw_results: Any|tuple[Any]|tuple[Result] = func(self, *args, **kwargs)
+                    return_values: Any | tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
                     self._has_errors = True
-                    if raise_errors is True:
-                        raise e
                     self.message.write(self.name, msg=f"Failed to run function 'main/{func.__name__}'", **msg.FAIL)
                     self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    # TODO: print some sort of traceback
+                    if raise_errors is True:
+                        raise e
                     return
 
                 # Cache the results
-                # TODO: if not use_cache...
-                results: tuple[Any]|tuple[Result]
-                if type(raw_results) is not tuple:
-                    results = (raw_results,)
-                else:
-                    results = raw_results
+                results: tuple[Result] = self._resultify(return_values)
 
-                return_data = self._cache_and_return_results(results)
+                # Process the returned data as result objects
+                unpacked_data: Any | tuple[Any] = self._cache_and_return_result_data(results)
                 self._executed = True
 
-                return (
-                    # Return the single instance of original data
-                    return_data[0] if len(return_data) == 1
-                    # Or a tuple if many
-                    else tuple(return_data)
-                )
+                return unpacked_data
 
         setattr(self, "main", _main_wrapper)
         return

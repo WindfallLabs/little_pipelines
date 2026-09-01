@@ -19,7 +19,7 @@ def test_result_caching():
     task_name = "TEST-TASK"
     extra_data = {"NOTE": "Hello"}
 
-    result = Result(result_name, task_name, 42, extra=extra_data)
+    result = Result(result_name, 42, task_name, extra=extra_data)
     cache.put(result)
 
     # Test get-results

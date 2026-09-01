@@ -38,6 +38,13 @@ class Message():
         self.pipeline._msg_queue.put(out)
         return
 
+    def close(self, *args, **kwargs):
+        #self.pipeline._msg_queue.put(exc)
+        #self.pipeline._msg_queue.put(None)  # sentinel to join the process
+        self.pipeline._stop_msg_thread()
+        #print("Closed queue")
+        #raise exc
+
 
 SHELL = {
     "task": "",

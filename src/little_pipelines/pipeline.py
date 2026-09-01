@@ -11,7 +11,6 @@ import threading
 from graphlib import TopologicalSorter
 from inspect import currentframe
 from queue import SimpleQueue
-from time import perf_counter_ns
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
 from . import _messages as msg
@@ -56,6 +55,8 @@ class Pipeline:
         self._msg_queue = SimpleQueue()
         self._msg_handler_thread: Optional[threading.Thread] = None
         self._spacing: Optional[int] = None
+
+        self._topologically_sorted: TopologicalSorter|None = None
 
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -105,14 +106,18 @@ class Pipeline:
     def _start_msg_thread(self) -> None:
         self._msg_handler_thread = threading.Thread(target=self._msg_handler, daemon=True)
         self._msg_handler_thread.start()
-        self.message.write("Pipeline", "Preparing Tasks...", **msg.PROCESS_START)
         return
 
     def _stop_msg_thread(self) -> None:
-        #self.message.write("Done")
         self._msg_queue.put(None)
         self._msg_handler_thread.join()
         return
+
+    @property
+    def topologically_sorted(self):
+        if not self._topologically_sorted:
+           self._topologically_sorted = TopologicalSorter(self._task_deps)
+        return self._topologically_sorted
 
     @property
     def tasks(self) -> Generator["Task"]:
@@ -129,7 +134,7 @@ class Pipeline:
                     except KeyError:  # TODO: remove this; let'r raise errors!
                         # Assume non-task dependencies are Result-dependencies
                         continue
-        for task_name in TopologicalSorter(self._task_deps).static_order():
+        for task_name in self.topologically_sorted.static_order():
             task: "Task" = self.get_task(task_name)
             yield task
 
@@ -137,8 +142,7 @@ class Pipeline:
         """Return all upstream dependencies of `key` in topological order."""
         if not self._task_deps:
             _ = list(self.tasks)
-        ts = TopologicalSorter(self._task_deps)
-        order = list(ts.static_order())
+        order = list(self.topologically_sorted.static_order())
 
         visited = set()
         stack = list(self._task_deps.get(task_name, []))
@@ -164,8 +168,7 @@ class Pipeline:
                 if dep is not None:
                     reverse.setdefault(dep, []).append(task)
 
-        ts = TopologicalSorter(self._task_deps)
-        order = list(ts.static_order())
+        order = list(self.topologically_sorted.static_order())
 
         visited = set()
         stack = list(reverse.get(task_name, []))
@@ -291,7 +294,7 @@ class Pipeline:
         Args:
             force_all (bool): Clears all previously cached results before execution
         """
-        _start = perf_counter_ns()
+        _timer = util.Timer().start()
 
         # Handle message queue
         self._start_msg_thread()
@@ -360,8 +363,8 @@ class Pipeline:
         nexec = nexec - nskip
 
         self.message.console.rule()
-        _time = util.time_diff(_start, perf_counter_ns())
-        self.message.write("Pipeline Completed", f"Ran {nexec}/{ntasks} tasks in {_time}", **msg.PIPELINE_COMPLETE)
+        _timer.stop()
+        self.message.write("Pipeline Completed", f"Ran {nexec}/{ntasks} tasks in {_timer}", **msg.PIPELINE_COMPLETE)
 
         if nskip > 0 or manual_tasks > 0:
             man_tasks = ""
@@ -396,52 +399,77 @@ class Pipeline:
             downstream (bool): Execute downstream tasks (and their dependencies)
             quiet (bool): Silences printed messages (default False)
         """
-        _start = perf_counter_ns()
+        try:
+            _timer = util.Timer().start()
+            ntasks = 0
+            nexec = 0
 
-        # Message queue
-        self._start_msg_thread()
+            # Message queue
+            self._start_msg_thread()
 
-        # Silence messages # TODO: WIP
-        self._quiet = quiet
+            # Silence messages # TODO: WIP
+            self._quiet = quiet
 
-        target_task = self.get_task(task_name)
-        if force:
-            self.cache.clear(task_name)
+            # Get target task
+            self.message.write("<Pipeline>", "Preparing Target Task...", **msg.PROCESS_START)
+            with util.process_timer() as _t:
+                target_task = self.get_task(task_name)
+                if force:
+                    self.cache.clear(task_name)
+            self.message.write("<Pipeline>", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
 
-        upstream_tasks = []
-        if upstream:
-            upstream_tasks = self.get_upstream_tasks(task_name)
-        
-        downstream_tasks = []
-        if downstream:
-            downstream_tasks = self.get_downstream_tasks(task_name)
+            # Get upstream and downstream tasks
+            self.message.write("<Pipeline>", "Preparing Upstream and Downstream Tasks...", **msg.PROCESS_START)
+            upstream_tasks = []
+            downstream_tasks = []
+            with util.process_timer() as _t:
+                # Upstream
+                if upstream:
+                    upstream_tasks = self.get_upstream_tasks(task_name)
+                # Downstream
+                if downstream:
+                    downstream_tasks = self.get_downstream_tasks(task_name)
+            self.message.write("<Pipeline>", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
 
-        _t = util.time_diff(_start, perf_counter_ns())
-        self.message.write("Pipeline", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
-        self.message.write("Pipeline", "Executing Tasks...", **msg.PROCESS_START)
-        nexec = 0
-        for tname in upstream_tasks:
-            task = self.get_task(tname)
-            if force:
-                self.cache.clear(tname)
-            task.main()
-            nexec += 1
-        
-        target_task.main(**kwargs)
-        nexec += 1
+            self.message.write("<Pipeline>", "Executing Tasks...", **msg.PROCESS_START)
+            with util.process_timer() as _t:
+                # Upstream tasks
+                for tname in upstream_tasks:
+                    ntasks += 1
+                    task = self.get_task(tname)
+                    if force:
+                        self.cache.clear(tname)
+                    task.main()
+                    if task.is_executed:
+                        nexec += 1
+                # Target task
+                target_task.main(**kwargs)
+                ntasks += 1
+                if target_task.is_executed:
+                    nexec += 1
+                # elif target_task.has_errors:  # TODO: why bother with downstream processes if this fails?
+                #     raise Exception("Error")
 
-        for tname in downstream_tasks:
-            task = self.get_task(tname)
-            if force:
-                self.cache.clear(tname)
-            task.main()
-            nexec += 1
+                # Downstream
+                for tname in downstream_tasks:
+                    ntasks += 1
+                    task = self.get_task(tname)
+                    if force:
+                        self.cache.clear(tname)
+                    task.main()
+                    if task.is_executed:
+                        nexec += 1
+            self.message.write("<Pipeline>", f"Tasks Executed (completed in {_t})", **msg.PROCESS_COMPLETE)
 
-        _time = util.time_diff(_start, perf_counter_ns())
-        ntasks = nexec
-        self.message.write("Tasks Completed", f"Ran {nexec}/{ntasks} tasks in {_time}", **msg.PIPELINE_COMPLETE)
-        # Final flush of message queue
-        self._stop_msg_thread()
+            _timer.stop()
+            self.message.write("Tasks Completed", f"Ran {nexec}/{ntasks} tasks in {_timer}", **msg.PIPELINE_COMPLETE)
+
+        except Exception as e:
+            raise e
+
+        finally:
+            # Final flush of message queue
+            self._stop_msg_thread()
 
         return
 

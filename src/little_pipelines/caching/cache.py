@@ -40,7 +40,7 @@ class Cache:
 
         self._setup_database()
 
-        # Serialization rules
+        # Serialization and rules
         self._serializers = {}
         self._default_serializer = DefaultSerializer()  # Pickle
         self._serializers["default"] = self._default_serializer
@@ -66,7 +66,12 @@ class Cache:
 
         return
 
-    def get(self, result_name: Optional[str] = None, task_name: Optional[str] = None, return_raw_rows=False) -> list[Result] | list[dict[str, Any]]:
+    def get(
+        self,
+        result_name: Optional[str] = None,
+        task_name: Optional[str] = None,
+        return_raw_rows=False
+    ) -> list[Result] | list[dict[str, Any]]:
         """Gets a list of Results from the cache."""
         if not result_name and not task_name:
             raise AttributeError("Empty dependency name")
@@ -78,7 +83,7 @@ class Cache:
         task_name = task_name.replace("*", "%") if task_name else None
         # if "%" not in result_name and result_name not in self.keys():
         #     raise KeyError(f"{result_name} not found in cache")
-        
+
         rows = (
             self._conn.execute(
                 "SELECT * FROM cache WHERE name LIKE ? OR task LIKE ?", (result_name, task_name)
@@ -101,6 +106,8 @@ class Cache:
         
     def put(self, result: Result, mode="UPSERT"):
         """Insert a Result into the cache."""
+        if type(result) is not Result:
+            raise TypeError("This method only accepts Result objects")
         serializer: Serializer = self.get_serializer(result.dtype)
         mode = mode.upper()
         if mode not in {'UPSERT', 'IGNORE', 'FAIL'}:
@@ -208,7 +215,7 @@ class Cache:
         serializer = self.get_serializer(result.dtype)
         return (
             result.name,
-            result.task,
+            result.task_name,
             result.dtype,
             result.last_updated.strftime(_DATETIME_FMT),
             result.expiry.strftime(_DATETIME_FMT) if result.expiry else None,
@@ -220,7 +227,7 @@ class Cache:
         serializer = self.get_serializer(row["dtype"])
         return Result(
             name=row["name"],
-            task=row["task"],
+            task_name=row["task"],
             data=serializer.loads(row["data"]),
             dtype=row["dtype"],
             last_updated=dt.datetime.strptime(row["last_updated"], _DATETIME_FMT),

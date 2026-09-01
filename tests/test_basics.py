@@ -63,5 +63,3 @@ def test_pipeline(cache, meaning_task, addition_task):
 
     assert cache.get("Meaning")[0].data == 42
     assert cache.get("Addition")[0].data == 50
-    assert meaning_task.results[0] == 42
-    assert addition_task.results[0] == 50

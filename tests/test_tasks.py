@@ -132,13 +132,15 @@ def test_cached_result_returned_on_second_call(cache):
     def main(t: Task):
         nonlocal call_count
         call_count += 1
-        return call_count
+        return call_count  # First call returns 1, second 2
 
-    task.main(force=True)   # Run and cache
-    result = task.main(force=False)  # Should read from cache
+    first_call = task.main(force=True)   # Run and cache (1)
+    assert first_call == 1
+    assert cache.keys() == ["Counted"]
 
+    second_call = task.main(force=False)  # Should read from cache
     assert call_count == 1  # main() body ran only once
-    assert result == (1,)   # Cached value returned
+    assert second_call == 1  # Cached value returned
 
 
 def test_force_reruns_task(cache):
@@ -153,9 +155,11 @@ def test_force_reruns_task(cache):
         call_count += 1
         return call_count
 
-    task.main()
-    task.main()
+    first = task.main()
+    second = task.main()
 
+    assert first == 1
+    assert second == 2
     assert call_count == 2
 
 

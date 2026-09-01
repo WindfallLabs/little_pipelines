@@ -8,7 +8,6 @@ The `extra` attribute must be a (pickled) dataclass or None.
 import datetime as dt
 import json
 import sqlite3
-#from dataclasses import asdict, dataclass, is_dataclass
 from hashlib import sha256
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -21,19 +20,19 @@ if TYPE_CHECKING:
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
 
-class Result:
+class Result:  # TODO: rename to TaskResult
     def __init__(
         self,
         name: str,
-        task: str,
         data: Any,
+        task_name: str,
         dtype: Optional[str] = None,
         last_updated: Optional[dt.datetime] = None,
         expiry: Optional[dt.datetime] = None,
         extra: Optional[dict] = None,
     ):
         self.name = name
-        self.task = task
+        self.task_name = task_name
         self.data = data
         self.dtype = dtype if dtype is not None else str(type(data))
         self.last_updated = last_updated if last_updated is not None else dt.datetime.now()
@@ -46,7 +45,7 @@ class Result:
             return NotImplemented
         return (
             self.name == other.name
-            and self.task == other.task
+            and self.task_name == other.task_name
             and self.data == other.data
             and self.dtype == other.dtype
             and self.last_updated == other.last_updated
