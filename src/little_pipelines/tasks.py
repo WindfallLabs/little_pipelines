@@ -129,20 +129,6 @@ class Task:
     # Properties
 
     @property
-    def results(self) -> dict[str|int, Any]:
-        """An accessor for the task's cached results."""
-        #return self.cache.get(task_name=self.name)
-        r: dict[str|int, Any] = {
-            r.name: r.data
-            for r in self.cache.get(task_name=self.name)
-        }
-        # Create a list-like 0-index shorthand accessor
-        if len(r.keys()) == 1:
-            r[0] = r[self.name]
-        
-        return r
-
-    @property
     def _script_hash(self):
         try:
             return hash_file(self._script_path)
@@ -188,7 +174,7 @@ class Task:
             deps: dict[str, Any] = {}
             for d in self._dependency_names:
                 try:
-                    dep: Result = self.cache.get(result_name=d)[0]
+                    dep: Result = self.cache.get(d)
                     deps[d] = dep
                 except IndexError:
                     raise DependencyNotFoundError(f"'{d}' not in cache")
@@ -215,7 +201,7 @@ class Task:
     #         return self.pipeline.logger
     #     return self._logger
 
-    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: consider fulfilling a Data object instead
+    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: remove and replace instances with my_data.fulfill(value)
         """
         Creates a Result object.
         """
@@ -231,21 +217,26 @@ class Task:
         )
         return r
 
-    def get_result(self, details=False, run_if_not_cached=False, **run_kwargs) -> Any|Result:  # TODO: deprecate?
+    def get_results(self, named=False) -> list[Result] | dict[str, Result]:  # TODO: add run_if_not_cached=False, **run_kwargs
         """
         Gets the Task's result(s).
 
         Args:
+            named (bool): Returns a dict[str, Result] if true, list[Results] if False
             details (bool): Returns the result as a Result
             run_if_not_cached (bool): Runs the task if the results are not already cached and returns the results of that process
         """
-        if run_if_not_cached and (not self.cache or self.name not in self.cache.keys()):
-            return self.run(**run_kwargs)
-        else:
-            r: Result = self.cache.get(self.name)
-        if details:
-            return r
-        return r.data
+        # TODO: run on demand?
+        #if run_if_not_cached and (not self.cache or self.name not in self.cache.keys()):
+        #    return self.run(**run_kwargs)
+        #else:
+        #    r: Result = self.cache.get(self.name)
+        
+        results: list[Result] | dict[str, Result]
+        results = self.cache.get_for_task(self.name)
+        if named:
+            results = {r.name: r for r in results}
+        return results
 
     def _default_cache_read_callback(self, cached_result: Result) -> Any:
         """The default cache-read callback."""
@@ -317,8 +308,8 @@ class Task:
             raise AttributeError("No cache set.")
 
         results: tuple[Any] = tuple([r.data for r in self.cache.get(task_name=self.name)])
-        if len(results) == 1:
-            results: Any = results[0]
+        #if len(results) == 1:
+        #    results: Any = results[0]
         return results
 
     def _resultify(self, return_values: Any) -> tuple[Result]:
@@ -413,7 +404,7 @@ class Task:
                 # Attempt to get cached data
                 #if self.use_cached_results:
                 if force is False:
-                    r: tuple[Result] = self._load_cached_results()
+                    r: list[Result] = self.cache.get_for_task(self.name)
                     if r is not None:
                         #self._skipped = True  # TODO: is this skipping?
                         return r

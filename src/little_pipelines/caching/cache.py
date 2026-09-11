@@ -68,25 +68,16 @@ class Cache:
 
     def get(
         self,
-        result_name: Optional[str] = None,
-        task_name: Optional[str] = None,
-        return_raw_rows=False
-    ) -> list[Result] | list[dict[str, Any]]:
-        """Gets a list of Results from the cache."""
-        if not result_name and not task_name:
-            raise AttributeError("Empty dependency name")
-        if not ((result_name or task_name) and not (result_name and task_name)):
-            raise AttributeError("Either a result_name or task_name is required")
-        
+        result_name: str,
+        return_raw_rows=False  # TODO: consider removing this
+    ) -> Result | list[dict[str, Any]]:
+        """Gets a Result from the cache."""
         # Allow * wildcards ('*' -> '%')
-        result_name = result_name.replace("*", "%") if result_name else None
-        task_name = task_name.replace("*", "%") if task_name else None
-        # if "%" not in result_name and result_name not in self.keys():
-        #     raise KeyError(f"{result_name} not found in cache")
+        result_name = result_name.replace("*", "%") if "*" in result_name else result_name
 
         rows = (
             self._conn.execute(
-                "SELECT * FROM cache WHERE name LIKE ? OR task LIKE ?", (result_name, task_name)
+                "SELECT * FROM cache WHERE name LIKE ?", (result_name,)
             )
             .fetchall()
         )
@@ -97,13 +88,37 @@ class Cache:
         results: list[Result] = []
         for row in rows:
             results.append(
-                #Result.from_row(row, self)
                 self._from_row(row)
             )
-        assert isinstance(results, list)
+        if len(results) == 0:
+            if result_name not in self.keys():
+                raise sqlite3.OperationalError(f"No such table {result_name}")
+
+        return results[0]
+
+    def get_for_task(self, task_name: str) -> list[Result]:
+        """Returns all Results for a given Task."""
+        # Allow * wildcards ('*' -> '%')
+        task_name = task_name.replace("*", "%") if "*" in task_name else task_name
+
+        rows = (
+            self._conn.execute(
+                "SELECT * FROM cache WHERE task LIKE ?", (task_name,)
+            )
+            .fetchall()
+        )
+
+        #if return_raw_rows:
+        #    return [dict(r) for r in rows]
+
+        results: list[Result] = []
+        for row in rows:
+            results.append(
+                self._from_row(row)
+            )
 
         return results
-        
+
     def put(self, result: Result, mode="UPSERT"):
         """Insert a Result into the cache."""
         if type(result) is not Result:
@@ -118,7 +133,6 @@ class Cache:
                 INSERT OR REPLACE INTO cache (name, task, dtype, last_updated, expiry, data, extra)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                #result.as_row(serializer)
                 self._to_row(result)
             )
         elif mode == "FAIL":
@@ -128,7 +142,6 @@ class Cache:
                     INSERT INTO cache (name, task, dtype, last_updated, expiry, data, extra)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    #result.as_row(serializer)
                     self._to_row(result)
                 )
             except sqlite3.IntegrityError:

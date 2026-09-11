@@ -182,7 +182,7 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection
 
-    def do_tasks(self, inp: str = ""):  # TODO: return a dataframe
+    def do_tasks(self, inp: str = ""):  # TODO: return a dataframe that includes whether it's got cached data
         """
         Lists all Tasks in the Pipeline.
         
@@ -293,7 +293,7 @@ class Shell(Cmd):
     # ========================================================================
     # Inspection - Cache utils
 
-    def _list_cache(self, inp: str):
+    def _list_cache(self, inp: str):  # TODO: refactor and consider 'tasks'
         clist = []
         if inp == "--all":
             cached_names = self.cache.keys()
@@ -366,10 +366,13 @@ class Shell(Cmd):
 
         Args:
             --force: Deletes the cache before executing the pipeline
+            --skip: Sets a layer to be skipped (can be used multiple times)
             --no-upstream: Does not execute upstream tasks. Only used when one task is specified.
             --no-downstream: Does not execute downstream tasks. Only used when one task is specified.
         """
         inputs: list[str] = inp.split()
+        if "--ignore" in inputs:
+            raise NameError("No --ignore flag. Did you mean --skip=<task> ?")
         force: bool = ("--force" in inputs)
         upstream: bool = not ("--no-upstream" in inputs)  # Default True
         downstream: bool = not ("--no-downstream" in inputs)  # Default True
