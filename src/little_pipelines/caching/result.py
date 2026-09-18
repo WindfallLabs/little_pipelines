@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
 
-class Result:  # TODO: rename to TaskResult
+class Result:
+    """An artifact (of Task) representing cached data."""
     def __init__(
         self,
         name: str,
