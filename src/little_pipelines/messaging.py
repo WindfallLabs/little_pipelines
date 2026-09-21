@@ -35,17 +35,18 @@ The logger works whether Tasks are executed through
 a Pipeline or manually in a Python shell.
 """
 
-from __future__ import annotations
-
 import datetime as dt
 import logging
 import queue
+from contextlib import contextmanager
 from dataclasses import dataclass
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 from typing import Optional
 
+from rich.console import Console
 from rich.logging import RichHandler
+
 
 # ============================================================================
 # Theme Definitions
@@ -102,6 +103,13 @@ FAIL = MessageTheme(
     message_style="red",
 )
 
+PIPELINE_INFO = MessageTheme(
+    level="DONE",
+    task_style="bright_black",
+    level_style="bright_black",
+    message_style="bright_black",
+)
+
 PIPELINE_COMPLETE = MessageTheme(
     level="DONE",
     task_style="green",
@@ -115,6 +123,28 @@ INFO = MessageTheme(
     level_style="bright_black",
     message_style="bright_black",
 )
+
+SHELL_INFO = MessageTheme(
+    level="INFO",
+    task_style="bright_black",
+    level_style="bright_black",
+    message_style="blue",
+)
+
+SHELL_COMPLETE = MessageTheme(
+    level="OK",
+    task_style="bright_black",
+    level_style="bright_black",
+    message_style="bright_black",
+)
+
+SHELL_FAIL = MessageTheme(
+    level="FAIL",
+    task_style="blue",
+    level_style="red bold",
+    message_style="red bold",
+)
+
 
 # ============================================================================
 # Formatter
@@ -137,10 +167,10 @@ class LPFormatter(logging.Formatter):
     default_time_format = "%Y-%m-%d %H:%M:%S.%f"
 
     def format(self, record: logging.LogRecord) -> str:
-
-        timestamp = dt.datetime.fromtimestamp(
-            record.created
-        ).strftime(self.default_time_format)[:-3]
+        timestamp = (
+            dt.datetime.fromtimestamp(record.created)
+            .strftime(self.default_time_format)[:-3]
+        )
 
         task = getattr(record, "task", "")
         event = getattr(record, "event", record.levelname)
@@ -170,26 +200,15 @@ class LPFormatter(logging.Formatter):
         )
 
         time_part = (
-            f"[bright_black][{timestamp}][/]"
+            #f"[bright_black][{timestamp}][/]"
+            f"[bright_black]" + timestamp + "[/]"
         )
 
-        task_part = (
-            f"  [{task_style}]"
-            f"{task.ljust(task_width)}"
-            f"[/]"
-        )
+        task_part = f"  [{task_style}]{task.ljust(task_width)}[/]"
 
-        level_part = (
-            f"[{level_style}]"
-            f" :{event.center(6)}: "
-            f"[/]"
-        )
+        level_part = f"[{level_style}] :{event.center(6)}:[/]"
 
-        msg_part = (
-            f"[{message_style}]"
-            f"{record.getMessage()}"
-            f"[/]"
-        )
+        msg_part = f"[{message_style}] {record.getMessage()}[/]"
 
         return (
             time_part
@@ -219,99 +238,63 @@ class LPLogger:
         name: str = "little_pipelines",
     ):
         self.name = name
-
+        self.console = Console()
         self._started = False
-
         self._queue: queue.Queue = queue.Queue()
-
-        self._listener: Optional[
-            QueueListener
-        ] = None
-
-        self._logger = logging.getLogger(
-            self.name
-        )
-
-        self._logger.setLevel(
-            logging.INFO
-        )
-
+        self._listener: Optional[QueueListener] = None
+        self._logger = logging.getLogger(self.name)
+        self._logger.setLevel(logging.INFO)
         self._logger.propagate = False
 
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
 
-    def start(
-        self,
-        log_file: Optional[str | Path] = None,
-    ) -> None:
-
+    def start(self, log_file: Optional[str | Path] = None) -> None:
         if self._started:
             return
 
         self._logger.handlers.clear()
-
-        queue_handler = QueueHandler(
-            self._queue
-        )
-
-        self._logger.addHandler(
-            queue_handler
-        )
+        queue_handler = QueueHandler(self._queue)
+        self._logger.addHandler(queue_handler)
 
         # Rich output
-
         rich_handler = RichHandler(
             markup=True,
             show_path=False,
             show_time=False,
             rich_tracebacks=True,
         )
-
-        rich_handler.setFormatter(
-            LPFormatter()
-        )
-
+        rich_handler.setFormatter(LPFormatter())
         handlers = [rich_handler]
 
         # Optional file logging
-
         if log_file:
-
             file_handler = logging.FileHandler(
                 log_file,
                 encoding="utf-8",
             )
-
             file_handler.setFormatter(
                 logging.Formatter(
                     "%(asctime)s | %(levelname)s | %(message)s"
                 )
             )
-
-            handlers.append(
-                file_handler
-            )
+            handlers.append(file_handler)
 
         self._listener = QueueListener(
             self._queue,
             *handlers,
             respect_handler_level=True,
         )
-
         self._listener.start()
-
         self._started = True
 
     def stop(self) -> None:
-
         if not self._started:
             return
 
         if self._listener:
             self._listener.stop()
-
         self._started = False
 
     # ------------------------------------------------------------------
@@ -319,7 +302,6 @@ class LPLogger:
     # ------------------------------------------------------------------
 
     def _ensure_started(self):
-
         if not self._started:
             self.start()
 
@@ -332,7 +314,6 @@ class LPLogger:
     ):
 
         self._ensure_started()
-
         self._logger.log(
             level,
             msg,
@@ -349,12 +330,7 @@ class LPLogger:
     # General Logging
     # ------------------------------------------------------------------
 
-    def info(
-        self,
-        msg: str,
-        task: str = "",
-    ):
-
+    def info(self, msg: str, task: str = "", ):
         self._emit(
             logging.INFO,
             msg,
@@ -362,12 +338,7 @@ class LPLogger:
             INFO,
         )
 
-    def warning(
-        self,
-        msg: str,
-        task: str = "",
-    ):
-
+    def warn(self, msg: str, task: str = "", ):
         self._emit(
             logging.WARNING,
             msg,
@@ -375,12 +346,7 @@ class LPLogger:
             WARN,
         )
 
-    def error(
-        self,
-        msg: str,
-        task: str = "",
-    ):
-
+    def error(self, msg: str, task: str = "", ):
         self._emit(
             logging.ERROR,
             msg,
@@ -388,16 +354,16 @@ class LPLogger:
             FAIL,
         )
 
+    @contextmanager
+    def spinner(self, status_msg: str):
+        with self.console.status(status_msg):
+            yield
+
     # ------------------------------------------------------------------
     # Task Helpers
     # ------------------------------------------------------------------
 
-    def task_start(
-        self,
-        task: str,
-        msg: str | None = None,
-    ):
-
+    def task_start(self, task: str, msg: str | None = None, ):
         self._emit(
             logging.INFO,
             msg or f"Running {task}...",
@@ -405,25 +371,15 @@ class LPLogger:
             TASK_START,
         )
 
-    def task_complete(
-        self,
-        task: str,
-        elapsed: str,
-    ):
-
+    def task_complete(self, task: str, elapsed: str, ):
         self._emit(
             logging.INFO,
-            f"(completed in {elapsed})",
+            f"(completed in {elapsed})" if elapsed else "complete",
             task,
             TASK_COMPLETE,
         )
 
-    def process_start(
-        self,
-        task: str,
-        process: str,
-    ):
-
+    def process_start(self, task: str, process: str, ):
         self._emit(
             logging.INFO,
             f"Running {process}...",
@@ -431,30 +387,52 @@ class LPLogger:
             PROCESS_START,
         )
 
-    def process_complete(
-        self,
-        task: str,
-        process: str,
-        elapsed: str,
-    ):
-
+    def process_complete(self, task: str, process: str, elapsed: Optional[str] = None, ):
         self._emit(
             logging.INFO,
-            f"{process} (completed in {elapsed})",
+            f"{process} (completed in {elapsed})" if elapsed else f"{process} complete",
             task,
             PROCESS_COMPLETE,
         )
 
-    def pipeline_complete(
-        self,
-        msg: str,
-    ):
+    def pipeline_info(self, msg: str):
+        self._emit(
+            logging.INFO,
+            msg,
+            "Pipeline",
+            PIPELINE_INFO,
+        )
 
+    def pipeline_complete(self, msg: str):
         self._emit(
             logging.INFO,
             msg,
             "Pipeline",
             PIPELINE_COMPLETE,
+        )
+
+    def shell_info(self, msg: str):
+        self._emit(
+            logging.INFO,
+            msg,
+            "Shell",
+            SHELL_INFO,
+        )
+
+    def shell_complete(self, msg: str = "OK"):
+        self._emit(
+            logging.INFO,
+            msg,
+            "Shell",
+            SHELL_COMPLETE,
+        )
+
+    def shell_error(self, msg: str):
+        self._emit(
+            logging.ERROR,
+            msg,
+            "Shell",
+            SHELL_FAIL,
         )
 
 
@@ -471,7 +449,6 @@ def get_logger() -> LPLogger:
 
     Lazily initialized.
     """
-
     global _GLOBAL_LOGGER
 
     if _GLOBAL_LOGGER is None:

@@ -1,5 +1,6 @@
 """
-
+Cache
+The persistence layer.
 """
 
 import datetime as dt
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from ..pipeline_run import PipelineRun
 from .result import Result
 from .serialize import Serializer, DefaultSerializer, StrSerializer
 
@@ -28,6 +30,17 @@ CREATE TABLE IF NOT EXISTS cache (
 CREATE INDEX IF NOT EXISTS idx_cache_task ON cache (task);
 CREATE INDEX IF NOT EXISTS idx_cache_last_updated ON cache (last_updated)
     WHERE last_updated IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id TEXT PRIMARY KEY,
+    pipeline_name TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    tasks_executed INTEGER NOT NULL,
+    tasks_skipped INTEGER NOT NULL,
+    tasks_failed INTEGER NOT NULL,
+    extra TEXT
+);
 """
 
 
@@ -65,6 +78,9 @@ class Cache:
         self._conn.commit()
 
         return
+
+    # ========================================================================
+    # Results
 
     def get(
         self,
@@ -176,7 +192,6 @@ class Cache:
             _ = self._conn.execute("VACUUM;").fetchall()
             return True
 
-
     def serializer(self, type_arg: type):
         """
         Decorator to register a CacheSerializer subclass.
@@ -251,4 +266,119 @@ class Cache:
     def close(self):
         """Close the database connection."""
         self._conn.close()
+        return
+
+    # ========================================================================
+    # Pipeline Runs
+    def put_run(self, run: PipelineRun) -> None:
+        """
+        Store a PipelineRun.
+        """
+        record = run.to_record()
+
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO pipeline_runs (
+                run_id,
+                pipeline_name,
+                start_time,
+                end_time,
+                tasks_executed,
+                tasks_skipped,
+                tasks_failed,
+                extra
+            )
+            VALUES (
+                :run_id,
+                :pipeline_name,
+                :start_time,
+                :end_time,
+                :tasks_executed,
+                :tasks_skipped,
+                :tasks_failed,
+                :extra
+            )
+            """,
+            record,
+        )
+
+        self._conn.commit()
+        return
+
+    def get_runs(self, pipeline_name: str | None = None) -> list:
+        """
+        Return PipelineRuns ordered newest-first.
+        """
+        cursor = self._conn.cursor()
+
+        if pipeline_name:
+            cursor.execute(
+                """
+                SELECT *
+                FROM pipeline_runs
+                WHERE pipeline_name = ?
+                ORDER BY start_time DESC
+                """,
+                (pipeline_name,),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT *
+                FROM pipeline_runs
+                ORDER BY start_time DESC
+                """
+            )
+
+        rows = cursor.fetchall()
+        columns = [
+            desc[0]
+            for desc in cursor.description
+        ]
+        runs = []
+
+        for row in rows:
+            record = dict(
+                zip(columns, row)
+            )
+            runs.append(
+                PipelineRun.from_record(record)
+            )
+
+        return runs
+
+    def get_last_run(self, pipeline_name: str | None = None) -> PipelineRun | None:
+        """
+        Return the most recent PipelineRun.
+        """
+
+        runs = self.get_runs(
+            pipeline_name=pipeline_name
+        )
+
+        if not runs:
+            return None
+
+        return runs[0]
+
+    def clear_runs(self, pipeline_name: str | None = None) -> None:
+        """
+        Delete stored PipelineRun records.
+        """
+        if pipeline_name:
+            self._conn.execute(
+                """
+                DELETE FROM pipeline_runs
+                WHERE pipeline_name = ?
+                """,
+                (pipeline_name,),
+            )
+        else:
+            self._conn.execute(
+                """
+                DELETE FROM pipeline_runs
+                """
+            )
+        self._conn.commit()
+
         return

@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from time import perf_counter_ns
 
+from tzlocal import get_localzone
+
 
 HOME = Path().home() / ".little_pipelines"
 DEFAULT = HOME / "DEFAULT"
@@ -14,6 +16,10 @@ DEFAULT_LOG_DIR = DEFAULT / "logs"
 DEFAULT_CACHE_FILE = DEFAULT / "DEFAULT_CACHE"
 if not DEFAULT.exists():
     DEFAULT.mkdir()
+
+# Quick pre-defined access to the local timezone
+# Use with all calls to dt.datetime.now(tz=lp.util.TIMEZONE)
+TIMEZONE = get_localzone()
 
 
 # TODO: deprecate
@@ -32,7 +38,9 @@ class Timer:
     def __init__(self, nanoseconds: int = 0):
         self.total_nanoseconds = nanoseconds
         self._start: int | None = None
+        self._start_dt: dt.datetime | None = None
         self._end: int | None = None
+        self._end_dt: dt.datetime | None = None
         self._status: str = "Stopped"
 
     def format_elapsed(self) -> str:
@@ -50,6 +58,7 @@ class Timer:
     def start(self):
         """Start the timer."""
         self._start = perf_counter_ns()
+        self._start_dt = dt.datetime.now(tz=TIMEZONE)
         self._status = "Running"
         return self
 
@@ -65,6 +74,7 @@ class Timer:
         if self._status == "Stopped":
             raise AttributeError("Timer is not running")
         self._end = perf_counter_ns()
+        self._end_dt = dt.datetime.now(tz=TIMEZONE)
         self._status = "Stopped"
         if self._start is None:
             raise RuntimeError("Timer never started")

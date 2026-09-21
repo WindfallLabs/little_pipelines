@@ -1,6 +1,6 @@
 """
 Wrapper class for cached data (and metadata/extras).
-
+Most analysts should interact with Data and Task objects rather than Result directly.
 
 The `extra` attribute must be a (pickled) dataclass or None.
 """
@@ -21,7 +21,7 @@ _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
 
 class Result:
-    """An artifact (of Task) representing cached data."""
+    """A serializable runtime artifact produced by a Task and persisted by Cache."""
     def __init__(
         self,
         name: str,

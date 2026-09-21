@@ -1,20 +1,97 @@
 """
 Little Pipelines Shell
+
+# GOALS
+- The shell should almost never touch an underscore attribute.
+- Be the largest consumer of the Data object
+
+
+TODO / Wishlist
+---------------
+
+Vision
+    The shell should evolve into the primary interactive workspace
+    for analysts using Little Pipelines, not merely a debugging tool.
+
+Principles
+    - Optimize for analyst workflows.
+    - Keep commands discoverable and self-documenting.
+    - Favor exploration over configuration.
+    - Keep subclassing as the primary extension mechanism.
+    - Do not introduce plugin architectures unless clearly necessary.
+
+Potential Refactors
+    - Split framework commands into dedicated modules:
+        shell.commands.execution
+        shell.commands.cache
+        shell.commands.inspection
+        shell.commands.validation
+
+    - Move reusable input parsing into:
+        shell.parsers
+
+    - Move reusable Rich output helpers into:
+        shell.ui
+
+    - Avoid direct access to underscore-prefixed Task/Pipeline internals
+      wherever practical; add public APIs instead.
+
+Potential Features
+    - Data/Dataset catalog commands:
+        datasets
+        dataset <name>
+        peek <dataset>
+
+    - Dependency exploration:
+        upstream <task>
+        downstream <task>
+        deps <task>
+
+    - Enhanced cache exploration:
+        cache-info
+        cache-size
+        cache-search
+
+    - Shell autocompletion for:
+        tasks
+        datasets
+        cache entries
+
+    - Rich tables and visualizations for inspection commands.
+
+Messaging / Logging
+    - Preserve logger.stop() in postcmd().
+      It serves as a synchronization point that prevents queued messages
+      from printing after the command prompt returns.
+
+    - Maintain standalone operation:
+      Tasks should preserve full logging and UX when run outside a Pipeline.
+
+Long-Term Goal
+    Little Pipelines should feel like an Analyst's Toolkit:
+
+        Pipelines      -> execution
+        Cache          -> persistence
+        Data           -> discovery/documentation
+        Shell          -> exploration and operations
+
+    The shell should become the natural place to inspect, execute,
+    understand, and troubleshoot analytical workflows.
+
 """
 
 import os
 import re
 from cmd import Cmd
-from getpass import getuser
 from graphlib import TopologicalSorter
 from typing import Literal, Optional, TYPE_CHECKING
 
 from rich.console import Console
 from rich.markdown import Markdown
 
-from . import _messages as msg, _autodoc
-from .caching import Cache
-from .pipeline import Pipeline
+from little_pipelines.caching import Cache
+from little_pipelines.messaging import get_logger, LPLogger
+from little_pipelines.pipeline import Pipeline
 from .shell_utils import (
     _handle_dataframe_printing_args,
 )
@@ -33,17 +110,13 @@ class Shell(Cmd):
     powered_by = True
     pipeline: Optional["Pipeline"] = None,
     cache: Optional[Cache] = None,
-    #logger = app_logger
+    logger: LPLogger = get_logger()
 
     def __init__(self, pipeline: Pipeline, cache: Cache):
         super().__init__()
         self.pipeline = pipeline
-        self.pipeline._shell = f"{self.__class__.__name__} | '{self.title}' | opened by {getuser()}"
+        self.pipeline._shell = f"{self.__class__.__name__} | '{self.title}'"
         self.cache = cache
-
-    @property
-    def message(self):
-        return msg.Message(None, self.pipeline._spacing or 14)
 
     # ========================================================================
     # Exit and aliases
@@ -75,7 +148,8 @@ class Shell(Cmd):
             return stop
         else:
             # Use 'End' as it doesn't indicate successful execution
-            self.message.write(**msg.SHELL_COMPLETE)
+            self.logger.shell_complete("Ready")
+            self.logger.stop()
         return stop
 
     def _default_startup(self, err: Optional[str]=None):
@@ -87,7 +161,6 @@ class Shell(Cmd):
         if self.powered_by:
             self.console.print("[bright_black]powered by Little-Pipelines[/]")
         self.console.print(f"Loaded pipeline: [bright_blue]{self.pipeline.name}[/]")
-        self.message.write(msg=f"Welcome {getuser()}", **msg.SHELL)
         self.console.print("[green]Ready.[/]")
         if err:
             self.console.print(f"[red]An error in `startup` occured: {err}[/]")
@@ -95,9 +168,11 @@ class Shell(Cmd):
 
     def _default_shutdown(self, err: Optional[str]=None):
         """Default shell-close behavior."""
-        self.message.write(msg="Shell closed", **msg.SHELL_COMPLETE)
+        self.logger.shell_complete("Shell closed")
         if err:
             self.console.print(f"[red]An error in `shutdown` occured: {err}[/]")
+        
+        self.logger.stop()  # flushes messages
         self.console.rule(style="yellow")
         self.console.print()
         return
@@ -149,22 +224,11 @@ class Shell(Cmd):
             #e.add_note("Error caught by shell")  # TODO: could be useful?
             #err = f"{e.__class__.__name__}: {' '.join(e.args)} ({' '.join(e.__notes__)})"
             err = f"{e.__class__.__name__}: {' '.join(e.args)}"
-            self.message.write(msg=f"{err}", **msg.SHELL_FAIL)
+            self.logger.shell_error(f"{err}")
         return
 
     # ========================================================================
     # Config
-
-    # TODO:
-    # def do_log(self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]):
-    #     """Sets the log level.
-    #     Use:
-    #         `log DEBUG`
-    #     """
-    #     level = level.upper()
-    #     #reset_app_logger(level)
-    #     self.console.print(f"Set logging to '{level}'")
-    #     return
 
     def do_quiet(self, inp):
         """Greatly reduces message output. Sets logging level to ERROR."""
@@ -188,7 +252,7 @@ class Shell(Cmd):
         
         --sorted - Sorts tasks alphabetically
         """
-        self.message.write(msg="Listing registered tasks...", **msg.SHELL)
+        self.logger.shell_info("Listing registered tasks...")
         with self.console.status("Loading..."):
             task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
         if "--sort" in inp:
@@ -225,6 +289,25 @@ class Shell(Cmd):
             self.console.print(tname)
         return
 
+    def do_status(self, inp):  # TODO: WIP
+        """Inspect the status of Data."""
+        for dataset in Data.all():
+            status = dataset.status()
+            self.console.print(
+                f"{dataset.name:<30}"
+                f"{status.state}"
+            )
+        return
+
+    # -------------
+    # TODO: make commands for
+    # - datasets
+    # - results
+    # - dependencies <TaskName>
+    # - downstream <TaskName>
+    # - upstream <TaskName>
+    # -------------
+
     def do_peek(self, inp: str):  # TODO: add a --details flag
         """
         Preview cached data.
@@ -234,9 +317,9 @@ class Shell(Cmd):
         """
         task_name = inp.split()[0]
         try:
-            result = self.cache.get(task_name)[0].data
+            result = self.cache.get(task_name).data
         except KeyError as e:
-            self.message.write(msg=e, **msg.SHELL_FAIL)
+            self.logger.shell_fail(e)
             return
 
         reset_dataframe_printing = _handle_dataframe_printing_args(inp, result)
@@ -265,10 +348,10 @@ class Shell(Cmd):
             task_name = inp.split()[0]
             task = self.pipeline.get_task(task_name)
         except IndexError:
-            self.message.write(msg="`info` requires a task name", **msg.SHELL_FAIL)
+            self.logger.shell_fail("`info` requires a task name")
             return
         except KeyError:
-            self.message.write(msg=f"No such task '{task_name}'", **msg.SHELL_FAIL)
+            self.logger.shell_fail(f"No such task '{task_name}'")
             return
 
         docstring, autodoc = task.get_info()
@@ -322,21 +405,21 @@ class Shell(Cmd):
         task_name = inp.split()[0]
         if not task_name:
             # No input error
-            self.message.write(msg="Input required: enter a task name, or use '.'", **msg.SHELL_FAIL)
+            self.logger.shell_fail("Input required: enter a task name, or use '.'")
             return
 
         ncache = len(self.cache.keys())
 
         if task_name.startswith("."):  # TODO: BUG: the console.status is wonk
             #if "--hard" in inp:
-            self.message.write(msg="Clearing all cached data...", **msg.SHELL)
-            with self.message.console.status("Clearing all cached data..."):
+            self.logger.shell_info("Clearing all cached data...")
+            with self.console.status("Clearing all cached data..."):
                 self.cache.clear()
-            self.message.write(msg=f"Cleared {ncache} of {ncache} cached results", **msg.SHELL)
+            self.logger.shell_info(f"Cleared {ncache} of {ncache} cached results")
             return
         # TODO: add some sort of keep flag?
         else:
-            self.message.write(msg=f"Clearing cached data for {task_name}...", **msg.SHELL)
+            self.logger.shell_info(f"Clearing cached data for {task_name}...")
             self.cache.clear(task_name)
         return
 
@@ -399,13 +482,13 @@ class Shell(Cmd):
         try:
             self._execute(inp)
         except Exception as e:
-            self.message.write(msg=f"Error: {e}", **msg.SHELL_FAIL)
+            self.logger.error(f"Error: {e}")
         return
 
     #@app_logger.catch
     def do_validate(self, inp) -> None:
         """Validates tasks."""  # TODO: more documentation -- what's this do?
-        self.message.write(msg="Validating...", **msg.SHELL)
+        self.logger.shell_info("Validating...")
         self.pipeline.validate_tasks()
         return
 

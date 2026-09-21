@@ -1,23 +1,23 @@
 """
 Pipeline
+Owns orchestration.
 """
 
-# BUG: weird bug, if this code content changes, my dependent pipeline re-executes as if I cleared the cache...
-
+import datetime as dt
 import importlib
 import inspect
-import sys
-import threading
-from graphlib import TopologicalSorter
+from dataclasses import dataclass
+from graphlib import CycleError, TopologicalSorter
 from inspect import currentframe
 from queue import SimpleQueue
 from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
 
-from . import _messages as msg
 from . import Cache
+from . import exc
 from . import util
-from .exc import PipelineValidationError
-#from ._logger import app_logger
+from .data import Data
+from .messaging import get_logger
+from .pipeline_run import PipelineRun
 
 if TYPE_CHECKING:
     from ._tasks import Task
@@ -47,15 +47,11 @@ class Pipeline:
 
         self._tasks: list["Task"] = []
         self.failures: set = set()
-        self._quiet = True  # Default True here, shell defaults to False
+        self.previous_run: PipelineRun|None = None
+        self.current_run: PipelineRun|None = None
 
         # Registry of task:dependencies
         self._task_deps: dict[str, list[str]] = {}
-        # Message queue
-        self._msg_queue = SimpleQueue()
-        self._msg_handler_thread: Optional[threading.Thread] = None
-        self._spacing: Optional[int] = None
-
         self._topologically_sorted: TopologicalSorter|None = None
 
         # Optional callback functions
@@ -65,53 +61,18 @@ class Pipeline:
         # The script the Pipeline is initialized in
         self._script = inspect.getmodule(inspect.currentframe().f_back)
 
+        # Logging
+        self.logger = get_logger()
+
     @property
     def is_complete(self) -> bool:
         """If all Pipeline Tasks have been completed."""
         return all([task.is_executed or task.is_skipped for task in self.tasks])
 
-    # @property
-    # def log_dir(self):
-    #     """Pipeline-specific log directory."""
-    #     if self._log_dir:
-    #         return self._log_dir
-    #     return
-
     @property
     def ntasks(self) -> int:
         """Task count."""
         return len(self._tasks)
-
-    @property
-    def message(self) -> msg.Message:
-        """Handle writing to the console."""
-        if self._spacing is None:
-            lens = [6]  # Default minimum; no need to expose to users
-            for t in self.tasks:
-                try:
-                    lens.append(len(t.name))
-                except Exception as e:  # KeyError, but why not everything
-                    pass
-            #msg_len = max(lens)
-            self._spacing = max(lens)
-        return msg.Message(self, spaces=self._spacing, quiet=self._quiet)
-
-    def _msg_handler(self):
-        while True:
-            msg = self._msg_queue.get()  # waits/blocks
-            if msg is None:  # None is the sentinel
-                break
-            self.message.console.print(msg)
-
-    def _start_msg_thread(self) -> None:
-        self._msg_handler_thread = threading.Thread(target=self._msg_handler, daemon=True)
-        self._msg_handler_thread.start()
-        return
-
-    def _stop_msg_thread(self) -> None:
-        self._msg_queue.put(None)
-        self._msg_handler_thread.join()
-        return
 
     @property
     def topologically_sorted(self):
@@ -125,15 +86,15 @@ class Pipeline:
         if not self._task_deps:
             for task in self._tasks:
                 self._task_deps[task.name] = []
-                for dep_name in task._dependency_names:
+                for dep_name in task.dependency_names:
                     # dep_name might be a task-name or a named-result
-                    try:
-                        # Find Task-dependencies
-                        _ = self.get_task(dep_name)
-                        self._task_deps[task.name].append(dep_name)
-                    except KeyError:  # TODO: remove this; let'r raise errors!
-                        # Assume non-task dependencies are Result-dependencies
-                        continue
+                    #try:
+                    # Find Task-dependencies
+                    dep_task = self.get_task(dep_name)
+                    self._task_deps[task.name].append(dep_name)
+                    #except KeyError:  # TODO: move this to validation
+                    #    # Assume non-task dependencies are Result-dependencies
+                    #    continue
         for task_name in self.topologically_sorted.static_order():
             task: "Task" = self.get_task(task_name)
             yield task
@@ -255,29 +216,119 @@ class Pipeline:
         importlib.reload(self._script)
         return
 
-    def validate_tasks(self):
-        """Pre-flight checks."""
-        run_errors: list[str] = []
+    def reload(self) -> None:
+        self.reload_task()
+        return
 
-        # Check if task has a user-defined main method (required)
-        for task in self._tasks:  # Unsorted
-            if not hasattr(task, "main"):
-                run_errors.append(task.name)
+    def _validate_required_methods(self) -> None:
+        """Ensure all Tasks define a main process."""
+        missing_main = [
+            task.name
+            for task in self._tasks
+            if not hasattr(task, "main")
+        ]
 
-        # Check if task dependencies are imported
-        # TODO: improve this so that the error returns a list of all invalid deps
-        # try:
-        #     list(self.tasks)  # TODO: this is a shorthand workaround for now
-        # except KeyError as e:
-        #     raise PipelineValidationError(f"Missing dependency for {task.name}: {e}")  # TODO: task name
-        # Removed to allow access to non-task cached Results
-
-        # TODO: More checks?
-
-        if run_errors:
-            raise AttributeError(
-                f"Tasks missing 'run' process: {', '.join(run_errors)}"
+        if missing_main:
+            raise exc.MissingMainProcessError(
+                f"Tasks missing 'main' process: "
+                f"{', '.join(sorted(missing_main))}"
             )
+
+    def _validate_duplicate_names(self) -> None:
+        """Ensure Task names are unique."""
+        task_names: list[str] = [task.name for task in self._tasks]
+        name_set: set[str] = set(task_names)
+        has_duplicates = len(task_names) != len(name_set)
+
+        if has_duplicates:
+            duplicates = {
+                name
+                for name in task_names
+                if task_names.count(name) > 1
+            }
+            raise exc.DuplicateTaskError(
+                f"Duplicate task names: {sorted(duplicates)}"
+            )
+
+    def _validate_missing_dependencies(self) -> None:
+        """Ensure all dependencies reference known Tasks or Results."""
+        known_names = {
+            task.name
+            for task in self._tasks
+        }
+        known_names.update(
+            {
+                result_name
+                for task in self._tasks
+                for result_name in task.outputs.keys()
+            }
+        )
+        missing: list[tuple[str, str]] = []
+        for task in self._tasks:
+            for dep in task.dependency_names:
+                if dep not in known_names:
+                    missing.append(
+                        (task.name, dep)
+                    )
+        if missing:
+            lines = [
+                f"{task_name} -> {dep_name}"
+                for task_name, dep_name in missing
+            ]
+            raise exc.MissingDependencyError(
+                "Missing dependencies:\n" + "\n".join(lines)
+            )
+
+    def _validate_cycles(self) -> None:
+        """Ensure the Task dependency graph is acyclic."""
+        graph: dict[str, list[str]] = {}
+        for task in self._tasks:
+            deps: list[str] = []
+            for dep in task.dependency_names:
+                # Result dependencies are not part of the task graph.
+                try:
+                    self.get_task(dep)
+                    deps.append(dep)
+                except KeyError:
+                    continue
+            graph[task.name] = deps
+
+        try:
+            ts = TopologicalSorter(graph)
+            ts.prepare()
+        except CycleError as e:
+            raise exc.CircularDependencyError(
+                f"Circular dependency detected: {e}"
+            ) from e
+
+    def validate_tasks(self) -> None:
+        """
+        Pre-flight validation checks.
+
+        Collect all validation failures and raise them together.
+        """
+
+        errors: list[exc.PipelineValidationError] = []
+
+        validators = (
+            self._validate_required_methods,
+            self._validate_duplicate_names,
+            self._validate_missing_dependencies,
+            self._validate_cycles,
+        )
+
+        for validator in validators:
+            try:
+                validator()
+            except Exception as e:
+                errors.append(e)
+
+        if errors:
+            raise ExceptionGroup(
+                "Pipeline validation failed",
+                errors,
+            )
+
         return
 
     def execute(
@@ -296,31 +347,26 @@ class Pipeline:
         """
         _timer = util.Timer().start()
 
-        # Handle message queue
-        self._start_msg_thread()
+        self.previous_run = self.current_run
+        self.current_run = PipelineRun(self.name, _timer._start_dt)
 
         if not force_tasks:
             force_tasks = []  # TODO: deprecate (set this at the task-level)
         if not skip_tasks:
-            skip_tasks = []  # TODO: deprecate (set this at the task-level)
-        nexec = 0
-        nfail = 0
-
-        # Silence messages # TODO: WIP
-        self._quiet = quiet
+            skip_tasks = []
 
         # Validate all tasks have run methods
         self.validate_tasks()
 
         # Extract tasks from generator
         tasks = list(self.tasks)
-        ntasks = len([t for t in tasks if not t.manual_execution_only])
+        self.current_run.tasks_total = len([t for t in tasks if not t.manual_execution_only])
         manual_tasks = len([t for t in tasks if t.manual_execution_only])
 
-        self.message.write("Pipeline", "Executing Tasks...", **msg.PROCESS_START)
+        self.logger.info(task="Pipeline", msg="Executing Tasks...")
 
         for task in tasks:
-            self.message.write(f"Starting {task.name}...")
+            self.logger.task_start(task.name)
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
                 #task.is_skipped = True  # TODO: this makes sense right?
@@ -329,7 +375,7 @@ class Pipeline:
                 task.cache.clear(task.name)
             # Handle ignored tasks
             if task.name in skip_tasks and task.name not in force_tasks:
-                self.message.write(task.name, "Skipped (by user)", **msg.WARN)
+                self.logger.warn(task=task.name, msg="Skipped (by user)")
                 task.is_skipped = True
                 continue
 
@@ -340,43 +386,43 @@ class Pipeline:
                 # Handle if upstream tasks (dependencies) failed
                 if self.check_failed_dependencies(task):  # Raises or returns bool
                     task.is_skipped = True
-                    #self.message.write(task.name, "Task ...?", **msg.WARN)
                     continue
 
                 # Execute
                 result: Any = task.main(raise_errors=raise_errors, quiet=quiet)
                 # TODO: type-check the expected result with the actual using task.outputs
                 if result is None:
-                    self.message.write(task.name, "Result is None", **msg.WARN)
-                nexec += 1
+                    self.logger.warn(task=task.name, msg="Result is None")
+                self.current_run.tasks_executed += 1
 
             except Exception as e:
+                self.current_run.tasks_failed += 1
                 self.failures.add(task.name)
-                self.message.write(task.name, f"{e.__class__.__name__}: {e}", **msg.FAIL)
-                # TODO: Log full stack
-                nfail += 1
+                self.logger.error(task=task.name, msg=f"{e.__class__.__name__}: {e}")
+                # TODO: Log full stack?
 
         # ====================================================================
         # Post Execution
-        nskip = len([t for t in tasks if t.is_skipped is True])
-        # TODO: change nexec to be the same?
-        nexec = nexec - nskip
 
-        self.message.console.rule()
+        self.current_run.tasks_skipped = len([t for t in tasks if t.is_skipped is True])
+
+        self.logger.console.rule()
         _timer.stop()
-        self.message.write("Pipeline Completed", f"Ran {nexec}/{ntasks} tasks in {_timer}", **msg.PIPELINE_COMPLETE)
+        self.logger.pipeline_complete(f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} tasks in {_timer}")
 
-        if nskip > 0 or manual_tasks > 0:
+        if self.current_run.tasks_skipped > 0 or manual_tasks > 0:
             man_tasks = ""
             if manual_tasks > 0:
                 man_tasks = f"(+{manual_tasks} manual-only)"
-            self.message.write(msg=f"Skipped: {nskip}/{ntasks} tasks {man_tasks}", **msg.WARN)
-        if nfail > 0:
-            self.message.write(msg=f"Failed: {nfail}/{ntasks} tasks", **msg.FAIL)
-        self.message.console.rule()
+            self.logger.warn(msg=f"Skipped: {self.current_run.tasks_skipped}/{self.current_run.tasks_total} tasks {man_tasks}")
+        if self.current_run.tasks_failed > 0:
+            self.logger.error(msg=f"Failed: {self.current_run.tasks_failed}/{self.current_run.tasks_total} tasks")
+        self.logger.console.rule()
 
-        # Final flush of message queue
-        self._stop_msg_thread()
+        # Cache the PipelineRun
+        self.current_run.stop()
+        if self.cache is not None:
+            self.cache.put_run(self.current_run)
 
         return
 
@@ -386,7 +432,6 @@ class Pipeline:
         force: bool = False,
         upstream: bool = True,
         downstream: bool = True,
-        quiet: bool = True,
         **kwargs
     ):
         """
@@ -397,79 +442,84 @@ class Pipeline:
             force (bool): False will pull cached data; True forces execution
             upstream (bool): Execute upstream tasks (and their dependencies)
             downstream (bool): Execute downstream tasks (and their dependencies)
-            quiet (bool): Silences printed messages (default False)
         """
+        _timer = util.Timer().start()
+
+        self.previous_run = self.current_run
+        self.current_run = PipelineRun(self.name, _timer._start_dt)
+
         try:
-            _timer = util.Timer().start()
-            ntasks = 0
-            nexec = 0
-
-            # Message queue
-            self._start_msg_thread()
-
-            # Silence messages # TODO: WIP
-            self._quiet = quiet
-
             # Get target task
-            self.message.write("<Pipeline>", "Preparing Target Task...", **msg.PROCESS_START)
+            self.logger.pipeline_info("Preparing Target Task...")
             with util.process_timer() as _t:
                 target_task = self.get_task(task_name)
                 if force:
                     self.cache.clear(task_name)
-            self.message.write("<Pipeline>", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
+            self.current_run.tasks_total += 1  # TODO: always just one?
+            self.logger.pipeline_info(f"completed in {_t}")
 
             # Get upstream and downstream tasks
-            self.message.write("<Pipeline>", "Preparing Upstream and Downstream Tasks...", **msg.PROCESS_START)
+            self.logger.pipeline_info("Preparing Upstream and Downstream Tasks...")
             upstream_tasks = []
             downstream_tasks = []
             with util.process_timer() as _t:
                 # Upstream
                 if upstream:
                     upstream_tasks = self.get_upstream_tasks(task_name)
+                    self.current_run.tasks_total += len(upstream_tasks)
                 # Downstream
                 if downstream:
                     downstream_tasks = self.get_downstream_tasks(task_name)
-            self.message.write("<Pipeline>", f"(completed in {_t})", **msg.PROCESS_COMPLETE)
+                    self.current_run.tasks_total += len(downstream_tasks)
+            self.logger.pipeline_info(f"completed in {_t}")
 
-            self.message.write("<Pipeline>", "Executing Tasks...", **msg.PROCESS_START)
+            self.logger.pipeline_info("Executing task(s)...")
             with util.process_timer() as _t:
                 # Upstream tasks
                 for tname in upstream_tasks:
-                    ntasks += 1
                     task = self.get_task(tname)
                     if force:
                         self.cache.clear(tname)
                     task.main()
                     if task.is_executed:
-                        nexec += 1
+                        self.current_run.tasks_executed += 1
+                    else:
+                        self.current_run.tasks_failed += 1
                 # Target task
                 target_task.main(**kwargs)
-                ntasks += 1
                 if target_task.is_executed:
-                    nexec += 1
+                    self.current_run.tasks_executed += 1
+                else:
+                    self.current_run.tasks_failed += 1
                 # elif target_task.has_errors:  # TODO: why bother with downstream processes if this fails?
                 #     raise Exception("Error")
 
                 # Downstream
                 for tname in downstream_tasks:
-                    ntasks += 1
                     task = self.get_task(tname)
                     if force:
                         self.cache.clear(tname)
                     task.main()
                     if task.is_executed:
-                        nexec += 1
-            self.message.write("<Pipeline>", f"Tasks Executed (completed in {_t})", **msg.PROCESS_COMPLETE)
+                        self.current_run.tasks_executed += 1
+                    else:
+                        self.current_run.tasks_failed += 1
+            self.logger.pipeline_info(f"Task(s) completed")
 
             _timer.stop()
-            self.message.write("Tasks Completed", f"Ran {nexec}/{ntasks} tasks in {_timer}", **msg.PIPELINE_COMPLETE)
+            self.logger.pipeline_complete(
+                f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} tasks in {_timer}"
+            )
 
         except Exception as e:
             raise e
 
-        finally:
-            # Final flush of message queue
-            self._stop_msg_thread()
+        # Cache the PipelineRun
+        self.current_run.stop()
+        if self.cache is not None:
+            self.cache.put_run(self.current_run)
+
+        self.logger.stop()
 
         return
 

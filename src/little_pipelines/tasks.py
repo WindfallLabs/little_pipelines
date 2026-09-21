@@ -11,11 +11,12 @@ from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
-from . import _messages as msg
 from . import _autodoc, util
 from .caching import Cache, Result
+from .data import Data
 from .exc import PipelineNotSetError, DependencyNotFoundError
 from ._hashing import hash_file, hash_files
+from .messaging import get_logger
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline
@@ -64,7 +65,7 @@ class Task:
         self: Self,
         name: str,
         cache: Optional[Cache] = None,
-        dependencies: Optional[list[str]] = None,
+        dependencies: Optional[list[str | Data]] = None,
 
         # TODO: WIP parameters
         outputs: Optional[dict[str, type]] = None,
@@ -78,21 +79,33 @@ class Task:
 
         Args:
             name: Unique task name (e.g. MyTask)
-            dependencies: List of task names this task depends on
+            dependencies: Data required for this Task to perform work.
             input_files: List of input file paths/patterns for hash tracking
             hash_inputs: If False, use empty string hash (for API/DB inputs)
             cache: Uses Pipeline's cache, default cache, or user-provided cache
             cache_results: Allow the task to save its results to the cache
+            outputs: A validation contract that describes what the Task promises to return.
         """
         self._name: str = name
-        self._dependency_names: frozenset[str] = frozenset(dependencies) if dependencies else set()
+
+        # Dependencies
+        dep_names = set()
+        if dependencies:
+            for dep in dependencies:
+                if isinstance(dep, Data):
+                    dep_names.add(dep.dependency_name())
+                else:
+                    dep_names.add(str(dep))
+        self._dependency_names = frozenset(dep_names)
+        #self._dependency_names: frozenset[str] = frozenset(dependencies) if dependencies else set()
         self._dependencies: Optional[dict[str, Any]] = None
 
-        if outputs is not None and not all(isinstance(k, str) for k in outputs.keys()):
-            raise AttributeError
-        self.outputs = {self._name: Any}
-        if outputs:
-            self.outputs = outputs
+        # if outputs is not None and not all(isinstance(k, str) for k in outputs.keys()):
+        #     raise AttributeError
+        # self.outputs = {self._name: Any}
+        # if outputs:
+        #     self.outputs = outputs
+        self._output_specs = self._normalize_outputs(outputs)
 
         self.if_upstream_errors = if_upstream_errors
 
@@ -113,7 +126,7 @@ class Task:
         self._g = module.f_globals
         # Get the filepath of the instance's script
         self._script = inspect.getmodule(module)
-        self._script_path = self._g.get('__file__')
+        self.script_path = self._g.get('__file__')
 
         # Pipeline
         self._pipeline: Optional["Pipeline"] = None
@@ -125,13 +138,30 @@ class Task:
         self.result_expiry = result_expiry  # NOTE: None
         self._result_names = set()
 
+        # Logging
+        self.logger = get_logger()
+
     # ========================================================================
     # Properties
 
     @property
+    def outputs(self) -> dict[str, type]:
+        """
+        Public view of Task outputs.
+
+        Returns the legacy mapping:
+            output_name -> dtype
+        """
+
+        return {
+            name: spec["dtype"]
+            for name, spec in self._output_specs.items()
+        }
+
+    @property
     def _script_hash(self):
         try:
-            return hash_file(self._script_path)
+            return hash_file(self.script_path)
         except:
             return ""
 
@@ -151,20 +181,15 @@ class Task:
     @is_skipped.setter
     def is_skipped(self, value: bool):
         try:
-            #self.logger.debug(f"Skipped: {value}")
-            #self.message.write(self.name, f"Skipped {value}")
+            #self.logger.warn(self.name, f"Skipped {value}")
             True  # TODO: not sure what callback is useful here
         except AttributeError:
             pass
         self._skipped = value
 
     @property
-    def message(self):
-        # Console messaging
-        if self.pipeline:
-            # This essentially gets the longest task name; handles errors
-            return self.pipeline.message
-        return msg.Message(None, len(self.name), self._quiet)
+    def dependency_names(self):
+        return self._dependency_names
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
@@ -190,18 +215,200 @@ class Task:
     @pipeline.setter
     def pipeline(self, pipeline: "Pipeline") -> None:
         self._pipeline = pipeline
-        # Additional on-add hooks
-        # TODO: consider logging
         return
 
-    # @property
-    # def logger(self):
-    #     """Return whatever logger is associated with the task."""
-    #     if self._pipeline:
-    #         return self.pipeline.logger
-    #     return self._logger
+    def _normalize_outputs(
+        self,
+        outputs: dict[str, type] | list[Data] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Normalize Task output declarations into a common structure.
 
-    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: remove and replace instances with my_data.fulfill(value)
+        Returns
+        -------
+        dict
+
+        Example:
+
+            {
+                "Parcels": {
+                    "dtype": GeoDataFrame,
+                    "validator": parcels.validate,
+                    "data": parcels,
+                }
+            }
+
+        Notes
+        -----
+        The returned structure is private framework metadata and
+        should not be exposed directly to users.
+        """
+
+        # Default Task output behavior
+        if outputs is None:
+            return {
+                self.name: {
+                    "dtype": Any,
+                    "validator": None,
+                    "data": None,
+                }
+            }
+
+        # ---------------------------------------------------------
+        # Data objects
+        # ---------------------------------------------------------
+
+        if isinstance(outputs, list):
+            specs: dict[str, dict[str, Any]] = {}
+            for data in outputs:
+                if not isinstance(data, Data):
+                    raise TypeError(
+                        "Task outputs lists must contain only "
+                        "Data objects."
+                    )
+
+                specs[data.name] = {
+                    "dtype": data.dtype,
+                    "validator": (
+                        data.validate
+                        if getattr(data, "_validator", None)
+                        else None
+                    ),
+                    "data": data,
+                }
+
+            return specs
+
+        # ---------------------------------------------------------
+        # Legacy dict[str, type]
+        # ---------------------------------------------------------
+
+        if isinstance(outputs, dict):
+            specs: dict[str, dict[str, Any]] = {}
+            for name, dtype in outputs.items():
+                if not isinstance(name, str):
+                    raise TypeError("Output names must be strings.")
+
+                if not isinstance(dtype, type):
+                    raise TypeError(f"Output '{name}' must map to a type.")
+
+                specs[name] = {
+                    "dtype": dtype,
+                    "validator": None,
+                    "data": None,
+                }
+
+            return specs
+
+        raise TypeError(
+            "outputs must be one of:\n"
+            "    None\n"
+            "    dict[str, type]\n"
+            "    list[Data]"
+        )
+
+    def _validate_outputs(self, results: tuple[Result]) -> None:
+        """
+        Validate Task outputs against the declared output contract.
+
+        Checks:
+
+            1. Missing outputs
+            2. Unexpected outputs
+            3. Output types
+            4. Data validators
+
+        Raises
+        ------
+        ExceptionGroup
+            One or more output validation failures.
+        """
+        errors: list[Exception] = []
+        expected = self._output_specs
+        actual = {result.name: result for result in results}
+        expected_names = set(expected.keys())
+        actual_names = set(actual.keys())
+
+        # ============================================================
+        # Missing outputs
+        # ============================================================
+
+        for missing_name in sorted(expected_names - actual_names):
+            errors.append(
+                MissingOutputError(f"Missing output: '{missing_name}'")
+            )
+
+        # ============================================================
+        # Unexpected outputs
+
+        for unexpected_name in sorted(actual_names - expected_names):
+            errors.append(
+                UnexpectedOutputError(f"Unexpected output: '{unexpected_name}'")
+            )
+
+        # ============================================================
+        # Type validation + Data validation
+
+        for output_name in (expected_names & actual_names):
+            result = actual[output_name]
+            spec = expected[output_name]
+            dtype = spec["dtype"]
+            data_obj = spec["data"]
+
+            # --------------------------------------------------------
+            # Type validation
+
+            if (
+                dtype is not Any
+                and dtype is not None
+                and not isinstance(
+                    result.data,
+                    dtype,
+                )
+            ):
+                dtype_name = getattr(
+                    dtype,
+                    "__name__",
+                    str(dtype),
+                )
+                errors.append(
+                    OutputTypeError(
+                        f"Output '{output_name}' "
+                        f"returned "
+                        f"{type(result.data).__name__}; "
+                        f"expected "
+                        f"{dtype_name}"
+                    )
+                )
+                # Skip deeper validation when the type is wrong.
+                continue
+
+            # --------------------------------------------------------
+            # Data validation
+
+            if data_obj is not None:
+                try:
+                    # Uses Data.validate(...)
+                    data_obj.validate(result.data)
+                except Exception as e:
+                    errors.append(
+                        OutputTypeError(
+                            f"Validation failed for '{output_name}': {e}"
+                        )
+                    )
+
+        # ============================================================
+        # Final
+
+        if errors:
+            raise ExceptionGroup(
+                f"Output validation failed for Task '{self.name}'",
+                errors,
+            )
+
+        return
+
+    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: remove and replace instances with Data.fulfill(value)
         """
         Creates a Result object.
         """
@@ -275,25 +482,14 @@ class Task:
     # ========================================================================
     # Decorators
 
-    @contextmanager  # TODO: replace with util.Timer or better, util.process_timer
-    def _timed(self, func_name: str, complete_kind: dict):
-        """Times a block, records it, and prints the completion message."""
-        _start = perf_counter_ns()
-        yield
-        _time = util.time_diff(_start, perf_counter_ns())
-        self._process_times.append((func_name, _time))
-        if not self._has_errors:
-            self.message.write(self.name, f"(completed in {_time})", **complete_kind)
-        return
-
     def process(self, func: Callable) -> None:
         """Wrapper for method-like custom functions."""
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> Any:
-            self.message.write(self.name, f"Running {func.__name__}...", **msg.PROCESS_START)
-            with self._timed(func.__name__, msg.PROCESS_COMPLETE):
-                with self.message.console.status(f"{self.name}: Running {func.__name__}..."):
-                    result = func(self, *args, **kwargs)
+            self.logger.process_start(self.name, func.__name__)
+            with util.process_timer() as _t:
+                with self.logger.spinner(f"{self.name}: Running {func.__name__}..."):
+                    result = func(self, *args, **kwargs)  # TODO: indent
             return result
 
         setattr(self, func.__name__, _process_wrapper)
@@ -304,7 +500,7 @@ class Task:
         Returns all cached data for this task.
         """
         if self.cache is None:
-            self.message.write(self.name, "No Cache set", **msg.WARN)
+            self.logger.warn(task=self.name, msg="No Cache set.")
             raise AttributeError("No cache set.")
 
         results: tuple[Any] = tuple([r.data for r in self.cache.get(task_name=self.name)])
@@ -347,8 +543,8 @@ class Task:
                 self.cache.put(result)
             except Exception as e:
                 self._has_errors = True
-                self.message.write(self.name, msg=f"Failed to cache data ({type(result).__name__})", **msg.FAIL)
-                self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                self.logger.error(task=self.name, msg=f"Failed to cache data ({type(result).__name__})")
+                self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
             unpacked_data.append(result.data)
 
         # Return the contents of the tuple if there's only one  # TODO: good idea?
@@ -376,7 +572,7 @@ class Task:
                 "quiet",
                 "raise_errors",
             ]
-            self.message.write(self.name, f"Running {self.name}...", **msg.TASK_START)
+            self.logger.task_start(self.name)
 
             # Process / handle kwargs
             # NOTE: these options are mostly for use within a shell
@@ -400,7 +596,7 @@ class Task:
             # Clean kwargs
             kwargs: dict = {k: v for k, v in kwargs.items() if k not in kwargs_allowed}
 
-            with self._timed(func.__name__, msg.TASK_COMPLETE):
+            with util.process_timer() as _t:
                 # Attempt to get cached data
                 #if self.use_cached_results:
                 if force is False:
@@ -414,15 +610,20 @@ class Task:
                     return_values: Any | tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
                     self._has_errors = True
-                    self.message.write(self.name, msg=f"Failed to run function 'main/{func.__name__}'", **msg.FAIL)
-                    self.message.write(self.name, msg=f"{e.__class__.__name__}: {e}", **msg.FAIL)
+                    self.logger.error(task=self.name, msg=f"Failed to run function 'main/{func.__name__}'")
+                    self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
                     # TODO: print some sort of traceback
                     if raise_errors is True:
                         raise e
                     return
 
-                # Cache the results
+                # Get the results
                 results: tuple[Result] = self._resultify(return_values)
+
+                # Validate outputs
+                self._validate_outputs(
+                    results
+                )
 
                 # Process the returned data as result objects
                 unpacked_data: Any | tuple[Any] = self._cache_and_return_result_data(results)

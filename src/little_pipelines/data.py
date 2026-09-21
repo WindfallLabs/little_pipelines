@@ -1,5 +1,6 @@
 """
 A Data object represents a conceptual dataset and definition.
+It's optional, but highly recommended for documentation. It's a feature for the advanced beta-testers.
 
 Examples:
 
@@ -40,6 +41,7 @@ Example
 from typing import Any, Callable, Optional
 
 from .caching.result import Result
+from .policies import Policy, Status
 
 
 class Data:
@@ -68,7 +70,7 @@ class Data:
         source: Optional[str] = None,
         owner: Optional[str] = None,
         tags: Optional[list[str]] = None,
-        # refresh_frequency  # TODO:
+        policy: Optional[Policy] = None,  # Freshness / invalidation / expiry policy
         **kwargs,
     ):
         self.name = name
@@ -85,11 +87,13 @@ class Data:
 
         self._kwargs = kwargs
 
+        # Freshness / invalidation / expiry policy
+        self.policy = policy
+        
         Data._registry[name] = self
 
     # ============================================================
     # Registration
-    # ============================================================
 
     def getter(self, func: Callable) -> Callable:
         """
@@ -122,14 +126,8 @@ class Data:
 
     # ============================================================
     # Access
-    # ============================================================
 
-    def get(
-        self,
-        validate: bool = False,
-        *args,
-        **kwargs,
-    ) -> Any:
+    def get(self, validate: bool = False, *args, **kwargs) -> Any:
         """
         Retrieve dataset contents.
 
@@ -174,10 +172,8 @@ class Data:
             value,
         )
 
-
     # ============================================================
     # Result creation
-    # ============================================================
 
     def fulfill(
         self,
@@ -220,7 +216,6 @@ class Data:
 
     # ============================================================
     # Discovery
-    # ============================================================
 
     @classmethod
     def lookup(cls, name: str) -> "Data":
@@ -253,8 +248,19 @@ class Data:
         ]
 
     # ============================================================
-    # Dunders
+    # Lifecycle
+    def status(self) -> Status:
+
+        if self.policy is None:
+
+            return Status.unknown(
+                "No policy configured"
+            )
+
+        return self.policy.check()
+
     # ============================================================
+    # Dunders
 
     def __getattr__(self, attr: str) -> Any:
         if attr in self._kwargs:
