@@ -2,7 +2,8 @@
 Data - Define and document data.
 
 A Data object represents a conceptual dataset and definition.
-It's optional, but highly recommended for documentation. It's a feature for the advanced beta-testers.
+It's optional, but highly recommended for documentation.
+It's a feature for the advanced beta-testers.
 
 Examples:
 
@@ -40,7 +41,8 @@ Example
     result = parcels.fulfill(gdf)
 """
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from .caching.result import Result
 from .policies import Policy, Status
@@ -67,12 +69,12 @@ class Data:
     def __init__(
         self,
         name: str,
-        dtype: Optional[type] = None,
-        doc: Optional[str] = None,
-        source: Optional[str] = None,
-        owner: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        policy: Optional[Policy] = None,  # Freshness / invalidation / expiry policy
+        dtype: type | None = None,
+        doc: str | None = None,
+        source: str | None = None,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+        policy: Policy | None = None,  # Freshness / invalidation / expiry policy
         **kwargs,
     ):
         self.name = name
@@ -84,8 +86,8 @@ class Data:
         self.owner = owner
         self.tags = tags or []
 
-        self._getter: Optional[Callable] = None
-        self._validator: Optional[Callable] = None
+        self._getter: Callable | None = None
+        self._validator: Callable | None = None
 
         self._kwargs = kwargs
 
@@ -182,8 +184,8 @@ class Data:
         value: Any,
         # TODO: validate: bool = True,
         *,
-        name: Optional[str] = None,
-        extra: Optional[dict] = None,
+        name: str | None = None,
+        extra: dict | None = None,
     ) -> "Result":
         """
         Simply creates a Result from this dataset definition.

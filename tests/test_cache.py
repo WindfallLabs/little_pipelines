@@ -30,6 +30,7 @@ from little_pipelines.exc import (
 # Result CRUD
 # ==============================================================================
 
+
 def test_put_and_get_result(cache):
     result = Result(
         name="Example",
@@ -73,6 +74,7 @@ def test_get_raw_rows(cache):
 # ==============================================================================
 # Wildcards
 # ==============================================================================
+
 
 def test_get_supports_name_wildcards(cache):
     cache.put(
@@ -122,6 +124,7 @@ def test_get_for_task_supports_wildcards(cache):
 # ==============================================================================
 # Insert Modes
 # ==============================================================================
+
 
 def test_put_requires_result_object(cache):
     with pytest.raises(TypeError):
@@ -183,6 +186,7 @@ def test_put_upsert_replaces_existing_result(cache):
 # Keys
 # ==============================================================================
 
+
 def test_keys_returns_sorted_names(cache):
     cache.put(Result("C", "Task", 1))
     cache.put(Result("A", "Task", 1))
@@ -198,6 +202,7 @@ def test_keys_returns_sorted_names(cache):
 # ==============================================================================
 # Clear
 # ==============================================================================
+
 
 def test_clear_single_result(cache):
     cache.put(
@@ -279,11 +284,11 @@ def test_clear_entire_cache(cache):
 # Serializers
 # ==============================================================================
 
+
 def test_custom_serializer(cache):
 
     @cache.serializer(complex)
     class ComplexSerializer(Serializer):
-
         def dumps(self, data):
             return str(data).encode()
 
@@ -312,6 +317,7 @@ def test_get_serializer_returns_default_for_unknown_type(cache):
 # ==============================================================================
 # Pipeline Runs
 # ==============================================================================
+
 
 def test_put_and_get_last_run(cache):
     run = PipelineRun(
@@ -420,6 +426,7 @@ def test_clear_all_runs(cache):
 # ==============================================================================
 # Connection
 # ==============================================================================
+
 
 def test_close(cache):
     cache.close()

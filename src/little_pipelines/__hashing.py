@@ -1,13 +1,14 @@
-"""Hashing utilities for pipeline cache invalidation."""
+"""
+Hashing utilities for pipeline cache invalidation.
+"""
 
 import hashlib
-import inspect
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ._tasks import Task
+    pass
 
 
 def hash_file(filepath: Path|BytesIO) -> str:
@@ -33,7 +34,7 @@ def hash_file(filepath: Path|BytesIO) -> str:
             hasher.update(chunk)
 
         return hasher.hexdigest()
-    except (OSError, IOError) as e:
+    except OSError:
         # File doesn't exist or can't be read
         # TODO: hash a dir?
         return "HASHERROR"
@@ -46,20 +47,3 @@ def hash_files(*files: Path):
         s += hash_file(i)
     # Hash the hashes
     return hashlib.sha256(s.encode("UTF8")).hexdigest()
-
-
-def hash_script(filepath: Path) -> str:
-    """
-    Hash the entire module file where the task is defined.
-
-    Args:
-        task: Task instance to hash
-
-    Returns:
-        SHA256 hash of the task's module file
-    """
-
-    try:
-        return #hash_file(module_file)
-    except (OSError, TypeError, AttributeError):
-        return "HASHERROR"

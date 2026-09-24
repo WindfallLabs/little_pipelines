@@ -18,6 +18,7 @@ from little_pipelines.exc import (
 # Output contract normalization
 # =============================================================================
 
+
 def test_outputs_property_reflects_dict_contract():
     task = Task(
         "Example",
@@ -97,6 +98,7 @@ def test_outputs_list_must_contain_data_objects():
 # Dict-based output contracts
 # =============================================================================
 
+
 def test_correct_output_type_passes(cache):
     task = Task(
         "Typed",
@@ -150,8 +152,7 @@ def test_wrong_output_type_raises(cache):
         task.main()
 
     assert any(
-        isinstance(e, TaskOutputValidationError)
-        for e in exc_info.value.exceptions
+        isinstance(e, TaskOutputValidationError) for e in exc_info.value.exceptions
     )
 
 
@@ -171,10 +172,7 @@ def test_missing_output_raises(cache):
     with pytest.raises(ExceptionGroup) as exc_info:
         task.main()
 
-    assert any(
-        isinstance(e, MissingOutputError)
-        for e in exc_info.value.exceptions
-    )
+    assert any(isinstance(e, MissingOutputError) for e in exc_info.value.exceptions)
 
 
 def test_no_outputs_returned_raises(cache):
@@ -195,9 +193,7 @@ def test_no_outputs_returned_raises(cache):
         task.main()
 
     missing = [
-        e
-        for e in exc_info.value.exceptions
-        if isinstance(e, MissingOutputError)
+        e for e in exc_info.value.exceptions if isinstance(e, MissingOutputError)
     ]
 
     assert len(missing) == 2
@@ -222,10 +218,7 @@ def test_unexpected_output_raises(cache):
     with pytest.raises(ExceptionGroup) as exc_info:
         task.main()
 
-    assert any(
-        isinstance(e, UnexpectedOutputError)
-        for e in exc_info.value.exceptions
-    )
+    assert any(isinstance(e, UnexpectedOutputError) for e in exc_info.value.exceptions)
 
 
 def test_any_output_type_accepts_any_value(cache):
@@ -239,9 +232,7 @@ def test_any_output_type_accepts_any_value(cache):
 
     @task.main
     def main(t):
-        return Data("value").fulfill(
-            {"anything": ["goes", 123]}
-        )
+        return Data("value").fulfill({"anything": ["goes", 123]})
 
     result = task.main()
 
@@ -283,6 +274,7 @@ def test_data_validation_errors_are_wrapped(cache):
 # =============================================================================
 # Error aggregation
 # =============================================================================
+
 
 def test_multiple_validation_errors_are_grouped(cache):
     task = Task(

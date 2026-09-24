@@ -1,4 +1,6 @@
-# tests/test_data.py
+"""
+Test Data
+"""
 
 from unittest.mock import Mock
 
@@ -11,6 +13,7 @@ from little_pipelines.caching.result import Result
 # ============================================================================
 # Test isolation
 # ============================================================================
+
 
 @pytest.fixture(autouse=True)
 def data_registry():
@@ -28,6 +31,7 @@ def data_registry():
 # ============================================================================
 # Construction
 # ============================================================================
+
 
 def test_init_stores_attributes():
     data = Data(
@@ -73,6 +77,7 @@ def test_extra_kwargs_available_via_getattr():
 # ============================================================================
 # Getter registration
 # ============================================================================
+
 
 def test_getter_decorator_registers_function():
     data = Data("Parcels")
@@ -123,6 +128,7 @@ def test_get_without_getter_raises_attribute_error():
 # ============================================================================
 # Validation
 # ============================================================================
+
 
 def test_validator_decorator_registers_function():
     data = Data("Parcels")
@@ -186,6 +192,7 @@ def test_get_validate_false_skips_validator():
 # Result creation
 # ============================================================================
 
+
 def test_fulfill_returns_result():
     data = Data("Parcels")
 
@@ -228,6 +235,7 @@ def test_fulfill_passes_extra_metadata():
 # ============================================================================
 # Discovery
 # ============================================================================
+
 
 def test_lookup_returns_registered_object():
     original = Data("Parcels")
@@ -278,6 +286,7 @@ def test_find_locals_returns_only_data_objects():
 # Status / policy integration
 # ============================================================================
 
+
 def test_status_without_policy_returns_unknown_status():
     data = Data("Parcels")
 
@@ -306,6 +315,7 @@ def test_status_delegates_to_policy():
 # ============================================================================
 # Miscellaneous
 # ============================================================================
+
 
 def test_dependency_name_returns_name():
     data = Data("Parcels")

@@ -19,6 +19,7 @@ from little_pipelines.pipeline_run import PipelineRun
 # Fixtures
 # ==============================================================================
 
+
 def test_pipeline_run_defaults():
     start = dt.datetime.now()
 
@@ -45,6 +46,7 @@ def test_pipeline_run_defaults():
 # Lifecycle
 # ==============================================================================
 
+
 def test_stop_marks_run_complete():
     run = PipelineRun(
         pipeline_name="Test",
@@ -62,6 +64,7 @@ def test_stop_marks_run_complete():
 # ==============================================================================
 # Success State
 # ==============================================================================
+
 
 def test_is_succeeded_true_when_no_failures():
     run = PipelineRun(
@@ -86,6 +89,7 @@ def test_is_succeeded_false_when_failures_exist():
 # ==============================================================================
 # Duration
 # ==============================================================================
+
 
 def test_duration_is_none_when_running():
     run = PipelineRun(
@@ -114,6 +118,7 @@ def test_duration_and_seconds_when_complete():
 # ==============================================================================
 # Serialization
 # ==============================================================================
+
 
 def test_to_record():
     start = dt.datetime(2025, 1, 1, 12, 0, 0)
@@ -162,7 +167,7 @@ def test_from_record_round_trip():
         tasks_skipped=1,
         tasks_failed=2,
         extra={
-            "user": "garin",
+            "user": "Garin",
             "version": 1,
         },
     )
@@ -202,6 +207,7 @@ def test_from_record_handles_empty_extra():
 # ==============================================================================
 # Representations
 # ==============================================================================
+
 
 def test_str_running():
     run = PipelineRun(

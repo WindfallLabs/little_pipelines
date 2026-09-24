@@ -3,11 +3,13 @@ Shell Utils
 """
 
 import re
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 
 def _handle_dataframe_printing_args(inp: str, result: Any) -> Callable|None:
-    """Handles setting and resetting column/row counts.
+    """
+    Handles setting and resetting column/row counts (for printing in Shell)
 
     Args:
         task_name: str
@@ -24,9 +26,9 @@ def _handle_dataframe_printing_args(inp: str, result: Any) -> Callable|None:
 
     cols = re.findall(r"--columns=(\d+)", inp)
     rows = re.findall(r"--rows=(\d+)", inp)
-    set_cols: Optional[Callable] = None
-    set_rows: Optional[Callable] = None
-    reset_func: Optional[Callable] = None
+    set_cols: Callable | None = None
+    set_rows: Callable | None = None
+    reset_func: Callable | None = None
 
     if (cols or rows) and "dataframe" in result_type:
         if "polars" in result_type:
@@ -36,7 +38,7 @@ def _handle_dataframe_printing_args(inp: str, result: Any) -> Callable|None:
             reset_func = pl.Config.restore_defaults
         elif "pandas" in result_type:
             import pandas as pd
-            default_rows: int = pd.get_option("display.max_rows"),
+            default_rows: int = pd.get_option("display.max_rows")
             default_cols: int = pd.get_option("display.max_columns")
             set_cols = lambda c: pd.set_option("display.max_columns", c)
             set_rows = lambda r: pd.set_option("display.max_rows", r)

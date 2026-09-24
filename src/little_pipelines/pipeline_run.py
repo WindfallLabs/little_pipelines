@@ -5,7 +5,6 @@ Metadata object for Pipeline execution.
 import datetime as dt
 import json
 import uuid
-
 from dataclasses import dataclass, field
 from typing import Any
 

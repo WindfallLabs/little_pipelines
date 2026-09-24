@@ -5,14 +5,14 @@ Cache - Result persistence.
 import datetime as dt
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal
 
-from ..exc import *
+from .. import exc
 from ..pipeline_run import PipelineRun
 from .result import Result
-from .serialize import Serializer, DefaultSerializer, StrSerializer
-
+from .serialize import DefaultSerializer, Serializer, StrSerializer
 
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
 
@@ -57,7 +57,7 @@ class Cache:
         """
         self._database_path = database_path
         self.database_path = database_path
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self.is_uri = False
 
         self._setup_database()
@@ -119,8 +119,7 @@ class Cache:
             )
         if len(results) == 0:
             if result_name not in self.keys():
-                #raise sqlite3.OperationalError(f"No such Result: {result_name}")
-                raise ResultNotFoundError(f"Not found: {result_name}")
+                raise exc.ResultNotFoundError(f"Not found: {result_name}")
 
         return results[0]
 
@@ -156,7 +155,7 @@ class Cache:
         """
         if type(result) is not Result:
             raise TypeError("This method only accepts Result objects")
-        serializer: Serializer = self.get_serializer(result.dtype)
+
         mode = mode.upper()
         if mode not in {'UPSERT', 'IGNORE', 'FAIL'}:
             raise ValueError("Mode must be one of 'UPSERT', 'IGNORE', or 'FAIL'")
@@ -178,8 +177,7 @@ class Cache:
                     self._to_row(result)
                 )
             except sqlite3.IntegrityError:
-                #raise sqlite3.IntegrityError(f"{result.name} already in cache")
-                raise ResultExistsError(f"Result exists in Cache: {result.name}")
+                raise exc.ResultExistsError(f"Result exists in Cache: {result.name}")
         self._conn.commit()
 
         return
@@ -191,14 +189,16 @@ class Cache:
         rows = self._conn.execute("SELECT name FROM cache").fetchall()
         return sorted([i[0] for i in rows])
 
-    def clear(self, name: Optional[str] = None) -> bool:
+    def clear(self, name: str | None = None) -> bool:
         """
         Clear a record from the cache, or rebuilds the cache table.
         """
         if name:
             name = name.replace("*", "%")
             try:
-                cur = self._conn.execute("DELETE FROM cache WHERE name LIKE ? OR task LIKE ?", (name, name))
+                cur = self._conn.execute(
+                    "DELETE FROM cache WHERE name LIKE ? OR task LIKE ?", (name, name)
+                )
                 row_cnt = cur.rowcount
                 _ = cur.fetchall()
                 self._conn.commit()
@@ -206,7 +206,7 @@ class Cache:
                 if row_cnt > 0:
                     return True
                 return False
-            except Exception as e:
+            except Exception:
                 return False
         else:
             _ = self._conn.execute("DROP TABLE cache;").fetchall()
@@ -374,7 +374,7 @@ class Cache:
 
         for row in rows:
             record = dict(
-                zip(columns, row)
+                zip(columns, row, strict=True)
             )
             runs.append(
                 PipelineRun.from_record(record)

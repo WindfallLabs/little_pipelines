@@ -7,15 +7,12 @@ import inspect
 from collections.abc import Callable, Sequence
 from functools import wraps
 from types import ModuleType
-from typing import Any, Optional, Literal, Self, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, Self
 
-from . import _autodoc, util
+from . import exc, util
 from .caching import Cache, Result
 from .data import Data
-from ._hashing import hash_file, hash_files
 from .messaging import get_logger
-from .exc import *  # TODO: be explicit
-
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline
@@ -58,15 +55,14 @@ class Task:
     def __init__(
         self: Self,
         name: str,
-        cache: Optional[Cache] = None,
-        dependencies: Optional[list[str | Data]] = None,
-
-        # TODO: WIP parameters
-        outputs: Optional[dict[str, type]] = None,
-        if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
-        result_expiry: Optional[dt.datetime|dt.date] = None,
-        use_cached_results: bool = True,
+        cache: Cache | None = None,
+        dependencies: list[str | Data] | None = None,
+        outputs: dict[str, type] | None = None,
         manual_execution_only: bool = False,
+        # WIP arguments
+        if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
+        result_expiry: dt.datetime | dt.date | None = None,
+        use_cached_results: bool = True,
     ):
         """
         Initialize a Task.
@@ -91,14 +87,8 @@ class Task:
                 else:
                     dep_names.add(str(dep))
         self._dependency_names = frozenset(dep_names)
-        #self._dependency_names: frozenset[str] = frozenset(dependencies) if dependencies else set()
-        self._dependencies: Optional[dict[str, Any]] = None
+        self._dependencies: dict[str, Any] | None = None
 
-        # if outputs is not None and not all(isinstance(k, str) for k in outputs.keys()):
-        #     raise AttributeError
-        # self.outputs = {self._name: Any}
-        # if outputs:
-        #     self.outputs = outputs
         self._output_specs = self._normalize_outputs(outputs)
 
         self.if_upstream_errors = if_upstream_errors
@@ -125,7 +115,7 @@ class Task:
         self.script_path = self._g.get('__file__')
 
         # Pipeline
-        self._pipeline: Optional["Pipeline"] = None
+        self._pipeline: Pipeline | None = None
         self._raise_errors = True
         # Initialize the cache stuff ....
         self.cache: Cache = cache
@@ -159,8 +149,8 @@ class Task:
         SHA256 has of the Python file containing the Task.
         """
         try:
-            return hash_file(self.script_path)
-        except:
+            return util.hashing.hash_file(self.script_path)
+        except Exception:
             return ""
 
     @property
@@ -186,11 +176,11 @@ class Task:
     def is_skipped(self, value: bool):
         """
         """
-        try:
-            #self.logger.warn(self.name, f"Skipped {value}")
-            True  # TODO: not sure what callback is useful here
-        except AttributeError:
-            pass
+        # try:
+        #     #self.logger.warn(self.name, f"Skipped {value}")
+        #     # TODO: not sure what callback is useful here
+        # except AttributeError:
+        #     pass
         self._skipped = value
 
     @property
@@ -215,8 +205,8 @@ class Task:
                 try:
                     dep: Result = self.cache.get(d)
                     deps[d] = dep
-                except ResultNotFoundError:
-                    raise DependencyNotFoundError(f"'{d}' not in cache")
+                except exc.ResultNotFoundError as e:
+                    raise exc.DependencyNotFoundError(f"'{d}' not in cache") from e
 
             self._dependencies = DependencyDict(deps)
 
@@ -347,7 +337,7 @@ class Task:
 
         for missing_name in sorted(expected_names - actual_names):
             errors.append(
-                MissingOutputError(f"Missing output: '{missing_name}'")
+                exc.MissingOutputError(f"Missing output: '{missing_name}'")
             )
 
         # ============================================================
@@ -355,7 +345,7 @@ class Task:
 
         for unexpected_name in sorted(actual_names - expected_names):
             errors.append(
-                UnexpectedOutputError(f"Unexpected output: '{unexpected_name}'")
+                exc.UnexpectedOutputError(f"Unexpected output: '{unexpected_name}'")
             )
 
         # ============================================================
@@ -384,7 +374,7 @@ class Task:
                     str(dtype),
                 )
                 errors.append(
-                    TaskOutputValidationError(
+                    exc.TaskOutputValidationError(
                         f"Output '{output_name}' "
                         f"returned "
                         f"{type(result.data).__name__}; "
@@ -404,7 +394,7 @@ class Task:
                     data_obj.validate(result.data)
                 except Exception as e:
                     errors.append(
-                        TaskOutputValidationError(
+                        exc.TaskOutputValidationError(
                             f"Validation failed for '{output_name}': {e}"
                         )
                     )
@@ -420,7 +410,8 @@ class Task:
 
         return
 
-    def result(self, data: Any, name: Optional[str] = None) -> Result:  # TODO: remove and replace instances with Data.fulfill(value)
+    # TODO: remove and replace instances with Data.fulfill(value)
+    def result(self, data: Any, name: str | None = None) -> Result:
         """
         Creates a Result object.
         """
@@ -436,14 +427,16 @@ class Task:
         )
         return r
 
-    def get_results(self, named=False) -> list[Result] | dict[str, Result]:  # TODO: add run_if_not_cached=False, **run_kwargs
+    # TODO: add run_if_not_cached=False, **run_kwargs
+    def get_results(self, named=False) -> list[Result] | dict[str, Result]:
         """
         Gets the Task's result(s).
 
         Args:
             named (bool): Returns a dict[str, Result] if true, list[Results] if False
             details (bool): Returns the result as a Result
-            run_if_not_cached (bool): Runs the task if the results are not already cached and returns the results of that process
+            run_if_not_cached (bool): Runs the task if the results are not already cached and
+                returns the results of that process
         """
         results: list[Result] | dict[str, Result]
         results = self.cache.get_for_task(self.name)
@@ -471,28 +464,12 @@ class Task:
         """
         return self._cache_read_callback(cached_result)
 
-    def get_info(self) -> tuple[str, str]:
+    def help(self) -> str:
         """
-        Returns the task definition's (script) docstring and auto-documented function info.
+        Provides a self-documentating help string.
         """
-        return (self._g.get("__doc__"), _autodoc(self))
-
-    # TODO: rename to _get_task and allow it to get tasks outside of dependencies
-    # TODO: or remove
-    # def get_dependency(self, task_name: str) -> "Task":
-    #     """
-    #     Gets a dependent Task object.
-        
-    #     Args:
-    #         task_name (str): The name of the Task to retrieve
-    #     """
-    #     if not self.pipeline:
-    #         raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
-    #     try:
-    #         #return self.dependencies[task_name]
-    #         return self.pipeline.get_task(task_name)
-    #     except KeyError:
-    #         raise KeyError(f"{task_name} is not a dependency of {self.name}")
+        # See _autodoc.py for the basic concept
+        raise NotImplementedError("Coming soon")
 
     # ========================================================================
     # Decorators
@@ -550,7 +527,9 @@ class Task:
         # Check result names for uniqueness
         result_names: list[str] = [r.name for r in results]
         if len(set(result_names)) != len(result_names):
-            raise DuplicateResultsError(f"Multiple Results have the same name: {result_names}")
+            raise exc.DuplicateResultsError(
+                f"Multiple Results have the same name: {result_names}"
+            )
 
         unpacked_data: list[Any] = []
         return_data: Any | tuple[Any]
@@ -559,7 +538,10 @@ class Task:
                 self.cache.put(result)
             except Exception as e:
                 self._has_errors = True
-                self.logger.error(task=self.name, msg=f"Failed to cache data ({type(result).__name__})")
+                self.logger.error(
+                    task=self.name,
+                    msg=f"Failed to cache data ({type(result).__name__})"
+                )
                 self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
             unpacked_data.append(result.data)
 
@@ -621,7 +603,10 @@ class Task:
                     return_values: Any | tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
                     self._has_errors = True
-                    self.logger.error(task=self.name, msg=f"Failed to run function 'main/{func.__name__}'")
+                    self.logger.error(
+                        task=self.name,
+                        msg=f"Failed to run function 'main/{func.__name__}'"
+                    )
                     self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
                     # TODO: print some sort of traceback
                     if raise_errors is True:
@@ -643,7 +628,7 @@ class Task:
                 return unpacked_data
 
         self._main_func = func
-        setattr(self, "main", _main_wrapper)
+        self.main = _main_wrapper
         return
 
     # ========================================================================

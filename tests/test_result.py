@@ -1,4 +1,6 @@
-# tests/test_result.py
+"""
+Test Result
+"""
 
 import datetime as dt
 
@@ -8,6 +10,7 @@ from little_pipelines.caching.result import Result
 # ============================================================================
 # Construction
 # ============================================================================
+
 
 def test_init_stores_attributes():
     now = dt.datetime(2025, 1, 1)
@@ -88,6 +91,7 @@ def test_datetime_format_stored():
 # ============================================================================
 # Equality
 # ============================================================================
+
 
 def test_equal_results_compare_true():
     timestamp = dt.datetime(2025, 1, 1)
@@ -266,6 +270,7 @@ def test_equality_with_non_result_returns_notimplemented():
 # ============================================================================
 # Repr
 # ============================================================================
+
 
 def test_repr_with_builtin_type():
     result = Result(

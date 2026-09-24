@@ -15,6 +15,7 @@ from little_pipelines import Task
 # Cached execution
 # =============================================================================
 
+
 def test_force_false_uses_cached_results(cache):
     call_count = 0
 
@@ -68,6 +69,7 @@ def test_force_true_reruns_task(cache):
 # Cache writes
 # =============================================================================
 
+
 def test_task_writes_result_to_cache(cache):
     task = Task(
         "Writer",
@@ -89,6 +91,7 @@ def test_task_writes_result_to_cache(cache):
 # =============================================================================
 # get_results()
 # =============================================================================
+
 
 def test_get_results_returns_cached_results(cache):
     task = Task(
@@ -137,6 +140,7 @@ def test_get_results_named_returns_mapping(cache):
 # =============================================================================
 # Multiple cached Results
 # =============================================================================
+
 
 def test_get_results_returns_multiple_cached_results(cache):
     task = Task(

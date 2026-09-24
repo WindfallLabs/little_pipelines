@@ -19,6 +19,7 @@ from little_pipelines.exc import DuplicateResultsError
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def simple_task(cache):
     task = Task(
@@ -36,6 +37,7 @@ def simple_task(cache):
 # =============================================================================
 # Basic state
 # =============================================================================
+
 
 def test_task_repr_contains_name(simple_task):
     assert "Simple" in repr(simple_task)
@@ -65,9 +67,11 @@ def test_process_wrapper(cache):
 
     assert task.main() == 123
 
+
 # =============================================================================
 # Return value handling
 # =============================================================================
+
 
 def test_single_scalar_return_is_unpacked(cache):
     task = Task(
@@ -165,6 +169,7 @@ def test_duplicate_result_name_raises(cache):
 # Error handling
 # =============================================================================
 
+
 def test_task_exception_is_raised_by_default(cache):
     task = Task(
         "Failure",
@@ -219,6 +224,7 @@ def test_failed_task_is_not_executed(cache):
 # Wrapper kwarg validation
 # =============================================================================
 
+
 def test_force_kwarg_must_be_bool(cache):
     task = Task(
         "Example",
@@ -251,6 +257,7 @@ def test_raise_errors_kwarg_must_be_bool(cache):
 # Wrapper behavior
 # =============================================================================
 
+
 def test_user_kwargs_are_passed_to_main(cache):
     task = Task(
         "Kwargs",
@@ -274,10 +281,13 @@ def test_internal_kwargs_are_not_passed_to_main(cache):
     def main(t):
         return 1
 
-    assert task.main(
-        force=True,
-        raise_errors=True,
-    ) == 1
+    assert (
+        task.main(
+            force=True,
+            raise_errors=True,
+        )
+        == 1
+    )
 
 
 def test_task_can_execute_multiple_times(cache):

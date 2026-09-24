@@ -43,14 +43,11 @@ from dataclasses import dataclass
 from enum import Enum
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Literal
 
 from rich.console import Console
-from rich.logging import RichHandler
-from rich.style import Style
-from rich.text import Text
 from rich.highlighter import NullHighlighter
-
+from rich.logging import RichHandler
 
 # ============================================================================
 # Options / Config
@@ -216,7 +213,9 @@ class LPFormatter(logging.Formatter):
         )
 
         level_colors = {"WARNING": "yellow", "ERROR": "red"}
-        level_part = f"[{level_colors.get(record.levelname, 'bright_black')}]{record.levelname:<8}[/]"
+        level_part = (
+            f"[{level_colors.get(record.levelname, 'bright_black')}]{record.levelname:<8}[/]"
+        )
         time_part = (
             f"[bright_black][{timestamp}][/]"
         )
@@ -252,7 +251,7 @@ class LPLogger:
         self.console = Console()
         self._started = False
         self._queue: queue.Queue = queue.Queue()
-        self._listener: Optional[QueueListener] = None
+        self._listener: QueueListener | None = None
         self._logger = logging.getLogger(self.name)
         self._logger.setLevel(logging.INFO)
         self._logger.propagate = False
@@ -302,7 +301,7 @@ class LPLogger:
     # ========================================================================
     # Setup
 
-    def start(self, log_file: Optional[str | Path] = None) -> None:
+    def start(self, log_file: str | Path | None = None) -> None:
         if self._started:
             return
 
@@ -441,7 +440,7 @@ class LPLogger:
             PROCESS_START,
         )
 
-    def process_complete(self, task: str, process: str, elapsed: Optional[str] = None, ):
+    def process_complete(self, task: str, process: str, elapsed: str | None = None, ):
         self._emit(
             logging.INFO,
             f"{process} (completed in {elapsed})" if elapsed else f"{process} complete",
@@ -493,7 +492,7 @@ class LPLogger:
 # ============================================================================
 # Singleton Access
 
-_GLOBAL_LOGGER: Optional[LPLogger] = None
+_GLOBAL_LOGGER: LPLogger | None = None
 
 
 def get_logger() -> LPLogger:

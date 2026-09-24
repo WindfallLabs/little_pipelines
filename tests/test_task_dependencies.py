@@ -18,6 +18,7 @@ from little_pipelines import exc
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def upstream_task(cache):
     task = Task(
@@ -51,6 +52,7 @@ def downstream_task(cache):
 # Dependency registration
 # =============================================================================
 
+
 def test_string_dependencies_are_normalized():
     task = Task(
         "Example",
@@ -60,9 +62,7 @@ def test_string_dependencies_are_normalized():
         ],
     )
 
-    assert task.dependency_names == frozenset(
-        {"A", "B"}
-    )
+    assert task.dependency_names == frozenset({"A", "B"})
 
 
 def test_data_dependencies_are_normalized():
@@ -75,9 +75,7 @@ def test_data_dependencies_are_normalized():
         dependencies=[upstream],
     )
 
-    assert task.dependency_names == frozenset(
-        {"Parcels"}
-    )
+    assert task.dependency_names == frozenset({"Parcels"})
 
 
 def test_duplicate_dependencies_are_deduplicated():
@@ -90,14 +88,13 @@ def test_duplicate_dependencies_are_deduplicated():
         ],
     )
 
-    assert task.dependency_names == frozenset(
-        {"A", "B"}
-    )
+    assert task.dependency_names == frozenset({"A", "B"})
 
 
 # =============================================================================
 # Dependency resolution
 # =============================================================================
+
 
 def test_dependency_result_accessible(
     upstream_task,
@@ -125,6 +122,7 @@ def test_dependencies_returns_result_objects(
 # =============================================================================
 # Dependency failures
 # =============================================================================
+
 
 def test_missing_dependency_raises(cache):
     task = Task(

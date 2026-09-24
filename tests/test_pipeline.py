@@ -23,6 +23,7 @@ from little_pipelines import Cache, Pipeline, Task
 # Fixtures
 # ==============================================================================
 
+
 @pytest.fixture
 def cache():
     return Cache()
@@ -69,6 +70,7 @@ def pipeline(cache):
 # Basics
 # ==============================================================================
 
+
 def test_pipeline_basics(pipeline):
     assert pipeline.ntasks == 3
     assert pipeline.get_task("A").name == "A"
@@ -78,6 +80,7 @@ def test_pipeline_basics(pipeline):
 # ==============================================================================
 # Graph
 # ==============================================================================
+
 
 def test_tasks_are_topologically_sorted(pipeline):
     assert [t.name for t in pipeline.tasks] == [
@@ -102,6 +105,7 @@ def test_upstream_and_downstream_helpers(pipeline):
 # ==============================================================================
 # Validation
 # ==============================================================================
+
 
 def test_validate_missing_main(cache):
     task = Task(
@@ -235,6 +239,7 @@ def test_get_task_by_output_name(cache):
 # Execution
 # ==============================================================================
 
+
 def test_execute_marks_pipeline_complete(pipeline):
     pipeline.execute()
 
@@ -287,6 +292,7 @@ def test_list_tasks_handles_missing_results(cache):
 # ==============================================================================
 # PipelineRun
 # ==============================================================================
+
 
 def test_pipeline_run_tracking(pipeline):
     pipeline.execute()

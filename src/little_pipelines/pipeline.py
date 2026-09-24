@@ -2,19 +2,13 @@
 Pipeline - The orchestration.
 """
 
-import datetime as dt
 import importlib
 import inspect
-from dataclasses import dataclass
+from collections.abc import Callable, Generator
 from graphlib import CycleError, TopologicalSorter
-from inspect import currentframe
-from queue import SimpleQueue
-from typing import Any, Callable, Optional, Generator, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from . import Cache
-from . import exc
-from . import util
-from .data import Data
+from . import Cache, Result, exc, util
 from .messaging import get_logger
 from .pipeline_run import PipelineRun
 
@@ -30,7 +24,7 @@ class Pipeline:
         self,
         name: str,
         expire_results_if_none: bool = True,
-        cache: Optional[Cache] = None,
+        cache: Cache | None = None,
     ):
         """
         Initialize a pipeline.
@@ -44,7 +38,7 @@ class Pipeline:
         self.expire_results_if_none = expire_results_if_none
         self.cache: Cache = cache or Cache()
 
-        self._tasks: list["Task"] = []
+        self._tasks: list[Task] = []
         self.failures: set = set()
         self.previous_run: PipelineRun|None = None
         self.current_run: PipelineRun|None = None
@@ -96,11 +90,11 @@ class Pipeline:
                 self._task_deps[task.name] = []
                 for dep_name in task.dependency_names:
                     # Find Task-dependencies
-                    dep_task = self.get_task(dep_name)
+                    #dep_task = self.get_task(dep_name)
                     self._task_deps[task.name].append(dep_name)
 
         for task_name in self.topologically_sorted:
-            task: "Task" = self.get_task(task_name)
+            task: Task = self.get_task(task_name)
             yield task
 
     def get_upstream_tasks(self, task_name: str) -> list[str]:
@@ -164,7 +158,10 @@ class Pipeline:
             self._tasks.append(task)
         return
 
-    def list_tasks(self, show_has_cached_data=False) -> list[str] | list[tuple[str, bool, str, str]]:
+    def list_tasks(
+        self,
+        show_has_cached_data=False
+    ) -> list[str] | list[tuple[str, bool, str, str]]:
         """
         Return a list of Task names, optionally showing the number of cached Results per task.
         """
@@ -174,7 +171,6 @@ class Pipeline:
 
         task_list: list[tuple[str, bool]] = []
         for t in self.tasks:
-            reason = ""
             try:
                 results: list[Result] = t.get_results()
                 task_list.append((t.name, len(results)))
@@ -191,7 +187,7 @@ class Pipeline:
         """
         failed_deps = set(task.dependencies).intersection(self.failures)
         if failed_deps != set():
-            msg = f"Failed dependencies: {failed_deps}"
+            #msg = f"Failed dependencies: {failed_deps}"
             return True
         return False
 
@@ -200,7 +196,7 @@ class Pipeline:
         Gets a task by name.
         """
         # Dict of task-name: Task
-        task_lookup: dict[str, "Task"] = {task.name: task for task in self._tasks}
+        task_lookup: dict[str, Task] = {task.name: task for task in self._tasks}
         # Add result-name: Task
         task_lookup.update({k: task for task in self._tasks for k in task.outputs.keys()})
         try:
@@ -357,8 +353,8 @@ class Pipeline:
     def execute(
         self,
         force_all = False,
-        force_tasks: Optional[list[str]] = None,
-        skip_tasks: Optional[list[str]] = None,
+        force_tasks: list[str] | None = None,
+        skip_tasks: list[str] | None = None,
         raise_errors: bool = True,
         **kwargs
     ) -> None:
@@ -437,7 +433,8 @@ class Pipeline:
         self.logger.console.rule()
         _timer.stop()
         self.logger.pipeline_complete(
-            f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} tasks in {_timer}"
+            f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} "
+            f"tasks in {_timer}"
         )
 
         if self.current_run.tasks_skipped > 0 or manual_tasks > 0:
@@ -445,7 +442,8 @@ class Pipeline:
             if manual_tasks > 0:
                 man_tasks = f"(+{manual_tasks} manual-only)"
             self.logger.warn(
-                msg=f"Skipped: {self.current_run.tasks_skipped}/{self.current_run.tasks_total} tasks {man_tasks}"
+                msg=f"Skipped: {self.current_run.tasks_skipped}/{self.current_run.tasks_total} "
+                f"tasks {man_tasks}"
             )
         if self.current_run.tasks_failed > 0:
             self.logger.error(
@@ -525,7 +523,8 @@ class Pipeline:
                     self.current_run.tasks_executed += 1
                 else:
                     self.current_run.tasks_failed += 1
-                # elif target_task.has_errors:  # TODO: why bother with downstream processes if this fails?
+                # TODO: why bother with downstream processes if this fails?
+                # elif target_task.has_errors:
                 #     raise Exception("Error")
 
                 # Downstream
@@ -538,11 +537,12 @@ class Pipeline:
                         self.current_run.tasks_executed += 1
                     else:
                         self.current_run.tasks_failed += 1
-            self.logger.pipeline_info(f"Task(s) completed")
+            self.logger.pipeline_info("Task(s) completed")
 
             _timer.stop()
             self.logger.pipeline_complete(
-                f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} tasks in {_timer}"
+                f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} "
+                f"tasks in {_timer}"
             )
 
         except Exception as e:

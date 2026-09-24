@@ -3,12 +3,10 @@ Result - Data-Cache interop-object.
 """
 
 import datetime as dt
-from typing import Any, Optional, TYPE_CHECKING
-
-from .serialize import Serializer
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .cache import Cache
+    pass
 
 
 _DATETIME_FMT = "%Y-%m-%dT%H:%M:%S.%f"
@@ -23,10 +21,10 @@ class Result:
         name: str,
         data: Any,
         task_name: str,
-        dtype: Optional[str] = None,
-        last_updated: Optional[dt.datetime] = None,
-        expiry: Optional[dt.datetime] = None,  # TODO: WIP
-        extra: Optional[dict] = None,
+        dtype: str | None = None,
+        last_updated: dt.datetime | None = None,
+        expiry: dt.datetime | None = None,  # TODO: WIP
+        extra: dict | None = None,
     ):
         """
         Initialize a Result

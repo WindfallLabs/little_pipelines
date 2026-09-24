@@ -6,7 +6,7 @@ Auto-document tasks and the custom processes therein.
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Annotated, Optional, TYPE_CHECKING, get_type_hints, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin, get_type_hints
 
 if TYPE_CHECKING:
     from little_pipelines import Task
@@ -19,8 +19,8 @@ class Arg:
     """
     name: str
     type_hint: str
-    doc: Optional[str] = ""
-    default: Optional[Any] = None
+    doc: str | None = ""
+    default: Any | None = None
 
     def as_string(self):
         return f"{self.name} ({self.type_hint}): {self.doc}"
@@ -41,7 +41,7 @@ class Func:
         s = (
             f"Task('{self.parent}').{self.name}\n"
             f"{self.doc}\n\nArgs:\n"
-            f"{'\n'.join(['    ' + a.as_string() for a in self.args])}\n\nReturns:"
+            "\n".join(["    " + a.as_string() for a in self.args]) + "\n\nReturns:"
         )
         return s + "\n    " + str(self.returns) + "\n\n\n"
 

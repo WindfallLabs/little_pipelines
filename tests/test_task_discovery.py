@@ -17,6 +17,7 @@ from little_pipelines import Task, find_tasks
 # Direct discovery
 # =============================================================================
 
+
 def test_find_tasks_finds_local_tasks():
     first = Task("First")
     second = Task("Second")
@@ -50,6 +51,7 @@ def test_find_tasks_returns_empty_set_when_no_tasks_exist():
 # =============================================================================
 # Nested module discovery
 # =============================================================================
+
 
 def test_find_tasks_finds_tasks_inside_modules():
     task = Task("Nested")
@@ -90,6 +92,7 @@ def test_find_tasks_nested_false_skips_modules():
 # De-duplication
 # =============================================================================
 
+
 def test_find_tasks_returns_unique_tasks():
     task = Task("Shared")
 
@@ -126,6 +129,7 @@ def test_find_tasks_deduplicates_direct_and_nested_references():
 # =============================================================================
 # Robustness
 # =============================================================================
+
 
 def test_find_tasks_ignores_modules_without_tasks():
     module = ModuleType("fake_module")

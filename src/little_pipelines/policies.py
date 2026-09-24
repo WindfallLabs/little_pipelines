@@ -22,8 +22,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from ._hashing import hash_file, hash_files
-
+from .util.hashing import hash_file, hash_files
 
 # ============================================================================
 # Status

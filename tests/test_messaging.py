@@ -1,4 +1,6 @@
-# tests/test_messaging.py
+"""
+Test messaging
+"""
 
 import logging
 
@@ -20,6 +22,7 @@ from little_pipelines.messaging import (
 # ============================================================================
 # Verbosity
 # ============================================================================
+
 
 @pytest.mark.parametrize(
     ("value", "expected_level", "expected_quiet"),
@@ -58,6 +61,7 @@ def test_quiet_property_setter_false():
 # Configuration
 # ============================================================================
 
+
 def test_set_max_task_name_len():
     logger = LPLogger()
 
@@ -75,6 +79,7 @@ def test_default_task_name_len():
 # ============================================================================
 # Lifecycle
 # ============================================================================
+
 
 def test_start_sets_started_flag():
     logger = LPLogger()
@@ -122,6 +127,7 @@ def test_start_is_idempotent():
 # ============================================================================
 # Internal Emission
 # ============================================================================
+
 
 def test_emit_starts_logger_if_needed(monkeypatch):
     logger = LPLogger()
@@ -194,6 +200,7 @@ def test_emit_passes_theme_metadata(monkeypatch):
 # ============================================================================
 # Convenience Logging Methods
 # ============================================================================
+
 
 def test_info_uses_info_theme(monkeypatch):
     logger = LPLogger()
@@ -316,6 +323,7 @@ def test_task_complete_without_elapsed(monkeypatch):
 # Formatter
 # ============================================================================
 
+
 def test_formatter_includes_message():
     formatter = LPFormatter()
 
@@ -358,6 +366,7 @@ def test_formatter_uses_custom_event():
 # ============================================================================
 # Singleton
 # ============================================================================
+
 
 def test_get_logger_returns_singleton():
     logger1 = get_logger()
