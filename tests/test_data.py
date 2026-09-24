@@ -1,195 +1,335 @@
-"""
-lp.Data tests
-"""
+# tests/test_data.py
+
+from unittest.mock import Mock
 
 import pytest
 
-import little_pipelines as lp
-
-DEFAULT = "Data placeholder"
-BRONZE = "Bronze data placeholder"
-GOLD = "Gold data placeholder"
+from little_pipelines.data import Data
+from little_pipelines.caching.result import Result
 
 
+# ============================================================================
+# Test isolation
+# ============================================================================
 
-def test_unnamed_layer():
+@pytest.fixture(autouse=True)
+def data_registry():
+    """
+    Data uses a global class-level registry.
 
-    my_data = lp.Data("MyData")
-
-    @my_data.getter
-    def get(d: lp.Data, *args, **kwargs):
-        return "Data placeholder"
-
-    assert my_data.get() == DEFAULT
-    assert my_data.data == DEFAULT
-    assert my_data["default"] == DEFAULT
-    assert "default" in my_data.layers
-
-
-def test_single_named_layer():
-    # All we do here is change the wrapped func name
-    raw_data = "Raw data placeholder"
-
-    my_data = lp.Data("MyData")
-
-    @my_data.getter("raw")
-    def raw(d: lp.Data, *args, **kwargs):
-        return "Raw data placeholder"
-
-    assert my_data.get("raw") == raw_data
-    assert my_data.raw == raw_data
-    assert my_data["raw"] == raw_data
-    assert "raw" in my_data.layers
+    Clear it before and after every test to prevent
+    order-dependent failures.
+    """
+    Data._registry.clear()
+    yield
+    Data._registry.clear()
 
 
-def test_default_named_func_layer():
-    # Wrapped function's name shouldn't matter
+# ============================================================================
+# Construction
+# ============================================================================
 
-    my_data = lp.Data("MyData")
-
-    @my_data.getter
-    def some_func_name_that_will_get_ignored(d: lp.Data, *args, **kwargs):
-        return "Data placeholder"
-
-    assert my_data.get() == DEFAULT
-    assert my_data.data == DEFAULT
-    assert my_data["default"] == DEFAULT
-    assert "default" in my_data.layers
-
-
-def test_multiple_layers():
-
-    my_data = lp.Data("MyData")
-
-    @my_data.getter
-    def get(d: lp.Data, *args, **kwargs):
-        return "Data placeholder"
-
-    # Or with multiple layers
-    @my_data.getter("bronze")
-    def bronze(d: lp.Data, *args, **kwargs):
-        return BRONZE
-
-    @my_data.getter("gold")
-    def gold(d: lp.Data, *args, **kwargs):
-        return GOLD
-
-
-    assert my_data.get() == DEFAULT
-    assert my_data.data == DEFAULT
-    assert my_data["default"] == DEFAULT
-    assert "default" in my_data.layers
-
-    assert my_data.get("bronze") == my_data["bronze"] == my_data.bronze == BRONZE
-    assert my_data.get("gold") == my_data["gold"] == my_data.gold == GOLD
-    assert "bronze" in my_data.layers
-    assert "gold" in my_data.layers
-
-
-def test_dtype_primative():
-
-    my_data = lp.Data("MyData")
-
-    @my_data.getter
-    def get(d: lp.Data, *args, **kwargs):
-        return 42
-
-    my_data.set_dtype(int)
-
-    assert my_data.layers["default"].dtype is int
-    assert isinstance(my_data.data, my_data.layers["default"].dtype)
-
-
-def test_dtype_decorated_classes():
-
-    my_data = lp.Data("MyData")
-
-    @my_data.set_dtype  # Default
-    class TestType():
-        def __init__(self):
-            self.value = 1
-
-    @my_data.getter
-    def get(d: lp.Data, *args, **kwargs):
-        return TestType()
-
-    @my_data.set_dtype("two")
-    class TestType2():
-        def __init__(self):
-            self.value = 42
-
-    @my_data.getter("two")
-    def get(d: lp.Data, *args, **kwargs):
-        return TestType2()
-
-    assert my_data.data.value == 1
-    assert my_data.layers["default"].dtype is TestType
-    assert isinstance(my_data.data, my_data.layers["default"].dtype)
-
-    assert my_data.two.value == 42
-    assert my_data.layers["two"].dtype is TestType2
-    assert isinstance(my_data.two, my_data.layers["two"].dtype)
-
-
-def test_validator():
-
-    my_data = lp.Data("MyData")
-
-    @my_data.getter
-    def get(d: lp.Data, *args, **kwargs):
-        return "42"
-
-    @my_data.validator
-    def validate(value):
-        v = int(value)
-        if v != 42:  # or not isinstance(v, d.dtype):
-            raise ValueError("Wrong value")
-        return v
-
-    result = my_data.get(validate=True)
-    assert result == 42
-    assert my_data.layers["default"].validator(result)
-
-
-def test_kwargs():
-    # Test setting kwargs as properties
-
-    my_data = lp.Data(
-        "MyData",
-        my_first_kwarg=42
+def test_init_stores_attributes():
+    data = Data(
+        "Parcels",
+        dtype=dict,
+        doc="Parcel dataset",
+        source="County GIS",
+        owner="Planning",
+        tags=["gis"],
     )
 
-    assert my_data.my_first_kwarg == 42
+    assert data.name == "Parcels"
+    assert data.dtype is dict
+    assert data.doc == "Parcel dataset"
+    assert data.source == "County GIS"
+    assert data.owner == "Planning"
+    assert data.tags == ["gis"]
 
 
-def test_make_result():
+def test_init_defaults_tags_to_empty_list():
+    data = Data("Parcels")
 
-    cache = lp.Cache()
-    NAME = "MyData"
-    my_data = lp.Data(NAME, cache=cache)
-    r: lp.Result = my_data.set_result(42)
-
-    assert isinstance(r, lp.Result)
-    assert r.name == NAME
-    assert r.data == 42
+    assert data.tags == []
 
 
-def test_cache_not_set():
-    # Test no cache
+def test_init_registers_instance():
+    data = Data("Parcels")
 
-    my_data = lp.Data("MyData")
+    assert Data.lookup("Parcels") is data
+
+
+def test_extra_kwargs_available_via_getattr():
+    data = Data(
+        "Parcels",
+        schema="public",
+        refresh="daily",
+    )
+
+    assert data.schema == "public"
+    assert data.refresh == "daily"
+
+
+# ============================================================================
+# Getter registration
+# ============================================================================
+
+def test_getter_decorator_registers_function():
+    data = Data("Parcels")
+
+    @data.getter
+    def get(dataset):
+        return "value"
+
+    assert data._getter is get
+
+
+def test_get_calls_registered_getter():
+    data = Data("Parcels")
+
+    @data.getter
+    def get(dataset):
+        return "value"
+
+    assert data.get() == "value"
+
+
+def test_get_passes_args_and_kwargs():
+    data = Data("Parcels")
+
+    received = {}
+
+    @data.getter
+    def get(dataset, *args, **kwargs):
+        received["args"] = args
+        received["kwargs"] = kwargs
+        return "ok"
+
+    data.get(False, 2025, county="Test")
+
+    assert received["args"] == (2025,)
+    assert received["kwargs"] == {
+        "county": "Test",
+    }
+
+
+def test_get_without_getter_raises_attribute_error():
+    data = Data("Parcels")
 
     with pytest.raises(AttributeError):
-        my_data.get("cache")
+        data.get()
 
 
-def test_cache():
-    # Test no cache
+# ============================================================================
+# Validation
+# ============================================================================
 
-    cache = lp.Cache()
-    NAME = "MyData"
-    my_data = lp.Data(NAME, cache=cache)
-    r: lp.Result = my_data.set_result(42)
-    cache.put(lp.Result(data=42, name=NAME, task_name=NAME))
+def test_validator_decorator_registers_function():
+    data = Data("Parcels")
 
-    assert my_data.get("cache").data == 42
+    @data.validator
+    def validate(dataset, value):
+        return value
+
+    assert data._validator is validate
+
+
+def test_validate_without_validator_returns_original_value():
+    data = Data("Parcels")
+
+    obj = object()
+
+    assert data.validate(obj) is obj
+
+
+def test_validate_uses_registered_validator():
+    data = Data("Parcels")
+
+    @data.validator
+    def validate(dataset, value):
+        return value.upper()
+
+    assert data.validate("hello") == "HELLO"
+
+
+def test_get_validate_true_invokes_validator():
+    data = Data("Parcels")
+
+    @data.getter
+    def get(dataset):
+        return "hello"
+
+    @data.validator
+    def validate(dataset, value):
+        return value.upper()
+
+    assert data.get(validate=True) == "HELLO"
+
+
+def test_get_validate_false_skips_validator():
+    data = Data("Parcels")
+
+    @data.getter
+    def get(dataset):
+        return "hello"
+
+    validator = Mock(return_value="HELLO")
+    data._validator = validator
+
+    result = data.get()
+
+    assert result == "hello"
+    validator.assert_not_called()
+
+
+# ============================================================================
+# Result creation
+# ============================================================================
+
+def test_fulfill_returns_result():
+    data = Data("Parcels")
+
+    result = data.fulfill({"rows": 10})
+
+    assert isinstance(result, Result)
+
+
+def test_fulfill_uses_data_name_by_default():
+    data = Data("Parcels")
+
+    result = data.fulfill("value")
+
+    assert result.name == "Parcels"
+    assert result.data == "value"
+
+
+def test_fulfill_accepts_custom_name():
+    data = Data("Parcels")
+
+    result = data.fulfill(
+        "value",
+        name="Custom Result",
+    )
+
+    assert result.name == "Custom Result"
+
+
+def test_fulfill_passes_extra_metadata():
+    data = Data("Parcels")
+
+    result = data.fulfill(
+        "value",
+        extra={"source": "cache"},
+    )
+
+    assert result.extra == {"source": "cache"}
+
+
+# ============================================================================
+# Discovery
+# ============================================================================
+
+def test_lookup_returns_registered_object():
+    original = Data("Parcels")
+
+    found = Data.lookup("Parcels")
+
+    assert found is original
+
+
+def test_lookup_missing_name_raises_keyerror():
+    with pytest.raises(KeyError):
+        Data.lookup("DoesNotExist")
+
+
+def test_all_returns_all_registered_objects():
+    one = Data("One")
+    two = Data("Two")
+
+    result = Data.all()
+
+    assert len(result) == 2
+    assert one in result
+    assert two in result
+
+
+def test_all_empty_registry():
+    assert Data.all() == []
+
+
+def test_find_locals_returns_only_data_objects():
+    one = Data("One")
+    two = Data("Two")
+
+    namespace = {
+        "one": one,
+        "two": two,
+        "number": 123,
+        "text": "hello",
+        "object": object(),
+    }
+
+    result = Data.find_locals(namespace)
+
+    assert set(result) == {"one", "two"}
+
+
+# ============================================================================
+# Status / policy integration
+# ============================================================================
+
+def test_status_without_policy_returns_unknown_status():
+    data = Data("Parcels")
+
+    result = data.status()
+
+    assert result is not None
+
+
+def test_status_delegates_to_policy():
+    expected = object()
+
+    policy = Mock()
+    policy.check.return_value = expected
+
+    data = Data(
+        "Parcels",
+        policy=policy,
+    )
+
+    result = data.status()
+
+    assert result is expected
+    policy.check.assert_called_once_with()
+
+
+# ============================================================================
+# Miscellaneous
+# ============================================================================
+
+def test_dependency_name_returns_name():
+    data = Data("Parcels")
+
+    assert data.dependency_name() == "Parcels"
+
+
+def test_unknown_attribute_raises_attribute_error():
+    data = Data("Parcels")
+
+    with pytest.raises(AttributeError):
+        data.not_real
+
+
+def test_repr_with_dtype():
+    data = Data(
+        "Parcels",
+        dtype=dict,
+    )
+
+    assert repr(data) == "<Data 'Parcels' (dict)>"
+
+
+def test_repr_without_dtype():
+    data = Data("Parcels")
+
+    assert repr(data) == "<Data 'Parcels' (Any)>"

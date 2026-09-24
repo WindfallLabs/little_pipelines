@@ -111,6 +111,7 @@ class Shell(Cmd):
     pipeline: Optional["Pipeline"] = None,
     cache: Optional[Cache] = None,
     logger: LPLogger = get_logger()
+    _message_verbosity = "normal"
 
     def __init__(self, pipeline: Pipeline, cache: Cache):
         super().__init__()
@@ -122,17 +123,21 @@ class Shell(Cmd):
     # Exit and aliases
 
     def do_exit(self, inp: str = "") -> Literal[True]:
-        """Exits the shell"""
-        # if self.pipeline and hasattr(self.pipeline, "cache"):
-        #     self.pipeline.cache._conn.close()
+        """
+        Exits the shell.
+        """
         return True
 
     def do_quit(self, inp: str = "") -> Literal[True]:
-        """Exits the shell"""
+        """
+        Exits the shell.
+        """
         return self.do_exit("")
 
     def do_q(self, inp: str = "") -> Literal[True]:
-        """Exits the shell"""
+        """
+        Exits the shell.
+        """
         return self.do_exit("")
 
     # ========================================================================
@@ -152,8 +157,10 @@ class Shell(Cmd):
             self.logger.stop()
         return stop
 
-    def _default_startup(self, err: Optional[str]=None):
-        """Default shell-start behavior."""
+    def _default_startup(self, err: Optional[str]=None) -> None:
+        """
+        Default shell-start behavior.
+        """
         self.console.clear()
         self.console.rule(f"[bright_black]{self.title}[/]", style="yellow on black")
         if hasattr(self, "header"):
@@ -166,8 +173,10 @@ class Shell(Cmd):
             self.console.print(f"[red]An error in `startup` occured: {err}[/]")
         return
 
-    def _default_shutdown(self, err: Optional[str]=None):
-        """Default shell-close behavior."""
+    def _default_shutdown(self, err: Optional[str]=None) -> None:
+        """
+        Default shell-close behavior.
+        """
         self.logger.shell_complete("Shell closed")
         if err:
             self.console.print(f"[red]An error in `shutdown` occured: {err}[/]")
@@ -177,7 +186,7 @@ class Shell(Cmd):
         self.console.print()
         return
 
-    def preloop(self):
+    def preloop(self) -> None:
         """
         Required for starting the CLI utility.
         Uses the user-defined 'startup' method, if exists.
@@ -193,7 +202,7 @@ class Shell(Cmd):
             self._default_startup()
         return
 
-    def postloop(self):
+    def postloop(self) -> None:
         """
         Required for shutting down the CLI utility.
         Uses the user-defined 'shutdown' method, if exists.
@@ -209,15 +218,17 @@ class Shell(Cmd):
             self._default_shutdown()
         return
 
-    def precmd(self, line: str):
-        """Process all initial input"""
+    def precmd(self, line: str) -> None:
+        """
+        Process all initial input.
+        """
         # Tolerance (syntax sugar) for dashes in function calls
         line = re.sub(r"^\S+", lambda x: x.group(0).replace("-", "_"), line)
         # Including when entered after "help"
         line = re.sub(r"^help \S+", lambda x: x.group(0).replace("-", "_"), line)
         return line
 
-    def onecmd(self, line: str):
+    def onecmd(self, line: str) -> None:
         try:
             return super().onecmd(line)
         except Exception as e:
@@ -230,49 +241,51 @@ class Shell(Cmd):
     # ========================================================================
     # Config
 
-    def do_quiet(self, inp):
-        """Greatly reduces message output. Sets logging level to ERROR."""
-        self.do_log("ERROR")
+    def do_quiet(self, inp) -> None:
+        """
+        Greatly reduces message output. Sets logging level to ERROR.
+        """
+        self._message_verbosity = "quiet"
+        self.logger.set_verbosity("quiet")
         return
 
     # ========================================================================
     # Reloading
     
-    def do_reload(self, inp: str):
-        """Reload tasks."""
+    def do_reload(self, inp: str) -> None:
+        """
+        Reload tasks.
+        """
         self.pipeline.reload_task()
         return
 
     # ========================================================================
     # Inspection
 
-    def do_tasks(self, inp: str = ""):  # TODO: return a dataframe that includes whether it's got cached data
+    def do_tasks(self, inp: str = "") -> None:  # TODO: return a dataframe that includes whether it's got cached data
         """
-        Lists all Tasks in the Pipeline.
-        
-        --sorted - Sorts tasks alphabetically
+        Lists all Tasks in the Pipeline and the number of cached Results for each Task.
+
+        Args:
+            --sorted - Sorts tasks alphabetically
         """
         self.logger.shell_info("Listing registered tasks...")
         with self.console.status("Loading..."):
             task_list: list[tuple[str, bool]] = self.pipeline.list_tasks(True)
         if "--sort" in inp:
             task_list.sort(key=lambda x: x[0])
-        # TODO: check expiry or value is None
-        c = len(task_list)
-        for tname, has_cache, last_update, reason in task_list:
-            if has_cache:
-                self.console.print(
-                    f"- {tname} ([green]cached[/], [bright_black]{last_update}[/])"
-                )
-            else:
-                self.console.print(
-                    # TODO: not an update date, but a warning message
-                    f"- {tname} ([yellow]{reason}[/])"
-                )
-        self.console.print(f"Registered Tasks: [bright_black]{c}[/]")
+        tot_tasks: int = len(task_list)
+        tot_results: int = 0
+        for tname, result_count in task_list:
+            tot_results += result_count
+            self.console.print(
+                f"- {tname} ([green]{result_count}[/])"
+            )
+        self.console.print(f"[b]Total Tasks: [blue]{tot_tasks}[/]")
+        self.console.print(f"[b]Total Results: [blue]{tot_results}[/]")
         return
 
-    def do_has_dependency(self, inp: str):
+    def do_has_dependency(self, inp: str) -> None:
         """
         Get tasks with the given dependency (task name).
         """
@@ -289,26 +302,20 @@ class Shell(Cmd):
             self.console.print(tname)
         return
 
-    def do_status(self, inp):  # TODO: WIP
-        """Inspect the status of Data."""
+    def do_status(self, inp) -> None:  # TODO: WIP
+        """
+        Inspect the status of Data.
+        """
         for dataset in Data.all():
             status = dataset.status()
             self.console.print(
                 f"{dataset.name:<30}"
                 f"{status.state}"
             )
+
         return
 
-    # -------------
-    # TODO: make commands for
-    # - datasets
-    # - results
-    # - dependencies <TaskName>
-    # - downstream <TaskName>
-    # - upstream <TaskName>
-    # -------------
-
-    def do_peek(self, inp: str):  # TODO: add a --details flag
+    def do_peek(self, inp: str) -> None:  # TODO: add a --details flag
         """
         Preview cached data.
         Optionally set row and column count with:
@@ -330,9 +337,10 @@ class Shell(Cmd):
         # Reset dataframe cols/rows printing
         if reset_dataframe_printing:
             reset_dataframe_printing()
+
         return
 
-    def do_info(self, inp: str):
+    def do_info(self, inp: str) -> None:
         """
         Print the documentation of the given Task.
         
@@ -371,6 +379,7 @@ class Shell(Cmd):
             self.console.print()  # Empty line
         # End with the path of the task definition
         self.console.print(f"[bright_black]{task._script_path}[/]")
+
         return
 
     # ========================================================================
@@ -388,20 +397,21 @@ class Shell(Cmd):
         return clist
 
     def do_list_cache(self, inp):
-        """List Task names with cached results."""
+        """
+        List Task names with cached results.
+        """
         for msg in self._list_cache(inp):
             self.console.print(msg)
         return
 
-    #@app_logger.catch
     def do_clear_cache(self, inp: str):
-        """Clear specified Task results from cache, or all data using '.' or '. --all'.
+        """
+        Clear specified Task results from cache, or all data using '.' or '. --all'.
 
         Args:
             task_name: The Task to clear cached data
             --hard: Clears all cached data, even those set to `expire.never`
         """
-        # TODO: raise KeyError if not exists
         task_name = inp.split()[0]
         if not task_name:
             # No input error
@@ -410,7 +420,7 @@ class Shell(Cmd):
 
         ncache = len(self.cache.keys())
 
-        if task_name.startswith("."):  # TODO: BUG: the console.status is wonk
+        if task_name.startswith("."):
             #if "--hard" in inp:
             self.logger.shell_info("Clearing all cached data...")
             with self.console.status("Clearing all cached data..."):
@@ -427,12 +437,16 @@ class Shell(Cmd):
     # Execution
     @staticmethod
     def _get_skipped(inputs: list[str]) -> bool:
-        """Extract skip instruction from shell input (str)."""
+        """
+        Extract skip instruction from shell input (str).
+        """
         return [i.replace("--skip=", "") for i in inputs if i.startswith("--skip=")]
 
     @staticmethod
     def _clean_kwargs(inputs: list[str]) -> dict[str, str]:
-        """Extract kwargs from shell input (str)."""
+        """
+        Extract kwargs from shell input (str).
+        """
         kwargs = dict()
         for i in inputs:
             if not i.startswith("--") or "=" not in i:
@@ -441,55 +455,63 @@ class Shell(Cmd):
             kwargs[k] = v
         return kwargs
 
-    # TODO: support executing one or more tasks: `execute One Two`
     def _execute(self, inp: str) -> None:
-        """
-        Execute each Task in the Pipeline.
-        If a single task is specified, upstream and downstream tasks may also be executed.
-
-        Args:
-            --force: Deletes the cache before executing the pipeline
-            --skip: Sets a layer to be skipped (can be used multiple times)
-            --no-upstream: Does not execute upstream tasks. Only used when one task is specified.
-            --no-downstream: Does not execute downstream tasks. Only used when one task is specified.
-        """
         inputs: list[str] = inp.split()
         if "--ignore" in inputs:
             raise NameError("No --ignore flag. Did you mean --skip=<task> ?")
         force: bool = ("--force" in inputs)
         upstream: bool = not ("--no-upstream" in inputs)  # Default True
         downstream: bool = not ("--no-downstream" in inputs)  # Default True
-        quiet: bool = ("--quiet" in inputs or "-q" in inputs)  # Default False
+        # Verbosity / Logging
+        if ("--quiet" in inputs or "-q" in inputs):
+            self.logger.set_verbosity("quiet")
+        if ("--verbose" in inputs or "-v" in inputs):
+            self.logger.set_verbosity("verbose")
         target_task_name = inputs[0]
         kwargs = self._clean_kwargs(inputs)
         # Process all tasks
         if target_task_name == ".":
             skipped_tasks: list[str] = self._get_skipped(inputs)
-            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks, quiet=quiet)  # TODO: kwargs?
-            return
+            self.pipeline.execute(force_all=force, skip_tasks=skipped_tasks)
+        else:
+            self.pipeline.execute_one(target_task_name, force=force, upstream=upstream, downstream=downstream, **kwargs)
+            # TODO: support executing one or more tasks: `execute One Two`
 
-        self.pipeline.execute_one(target_task_name, force=force, upstream=upstream, downstream=downstream, quiet=quiet, **kwargs)
+        # Return to shell-level verbosity
+        self.logger.set_verbosity(self._message_verbosity)
+        self.console.rule(style="yellow")
+
         return
 
-    #@app_logger.catch
-    def do_execute(self, inp):
-        """Execute each Task in the Pipeline.
+    def do_execute(self, inp) -> None:
+        """
+        Execute a Task by name, or every Task in the Pipeline (using '.').
+        If a single task is specified, upstream and downstream tasks may also be executed.
 
         Args:
-            --force: Clears cached results, thereby causing all Tasks to execute
-            --skip: Flag a Task name to be skipped
+            --force: Clears all Results from the Cache before executing the Pipeline (ensures all Tasks execute cleanly).
+            --skip: Flag a Task name to be skipped (can be used multiple times; e.g. `--skip=This --skip=That`).
+            --no-upstream: Does not execute upstream tasks. Only used when one task is specified.
+            --no-downstream: Does not execute downstream tasks. Only used when one task is specified.
+            --quiet: Change logging level to WARNINGs only for this execution.
         """
         try:
             self._execute(inp)
+
         except Exception as e:
             self.logger.error(f"Error: {e}")
+            self.console.print_exception()
+
         return
 
-    #@app_logger.catch
     def do_validate(self, inp) -> None:
-        """Validates tasks."""  # TODO: more documentation -- what's this do?
+        """
+        Validates tasks.
+        """
+        # TODO: more documentation -- what's this do?
         self.logger.shell_info("Validating...")
         self.pipeline.validate_tasks()
+
         return
 
 

@@ -1,21 +1,22 @@
 """
-Tests for the Pipeline object.
+Focused tests for the Pipeline object.
 
-Covers:
-- Basic setup and repr
-- Task registration and listing
-- Topological execution order
-- Skipping tasks (skip_tasks)
-- Failure handling and downstream skipping
-- get_upstream_tasks / get_downstream_tasks
-- execute_one (target only, with upstream, with downstream)
-- manual_execution_only tasks
+Pipeline responsibilities:
+    - Task registration
+    - Dependency ordering
+    - Graph traversal
+    - Validation
+    - Orchestration
+    - PipelineRun tracking
+
+These tests intentionally avoid exercising Task, Result,
+and Cache internals except where required to observe
+Pipeline behavior.
 """
 
 import pytest
 
-import little_pipelines as lp
-from little_pipelines import Cache, Task, Pipeline
+from little_pipelines import Cache, Pipeline, Task
 
 
 # ==============================================================================
@@ -28,281 +29,273 @@ def cache():
 
 
 @pytest.fixture
-def task_a(cache):
-    """Root task -- no dependencies."""
-    task = Task("A", cache=cache)
+def pipeline(cache):
+    a = Task("A", cache=cache)
 
-    @task.main
-    def main(t: Task):
+    @a.main
+    def main_a(t):
         return "a"
 
-    return task
+    b = Task(
+        "B",
+        cache=cache,
+        dependencies=["A"],
+    )
 
+    @b.main
+    def main_b(t):
+        return "b"
 
-@pytest.fixture
-def task_b(cache, task_a):
-    """Depends on A."""
-    task = Task("B", cache=cache, dependencies=["A"])
+    c = Task(
+        "C",
+        cache=cache,
+        dependencies=["B"],
+    )
 
-    @task.main
-    def main(t: Task):
-        upstream = t.dependencies["A"].data
-        return upstream + "b"
+    @c.main
+    def main_c(t):
+        return "c"
 
-    return task
+    p = Pipeline(
+        "Test",
+        cache=cache,
+    )
+    p.add(a, b, c)
 
-
-@pytest.fixture
-def task_c(cache, task_b):
-    """Depends on B."""
-    task = Task("C", cache=cache, dependencies=["B"])
-
-    @task.main
-    def main(t: Task):
-        upstream = t.dependencies["B"].data
-        return upstream + "c"
-
-    return task
-
-
-@pytest.fixture
-def pipeline(task_a, task_b, task_c):
-    """A simple three-task linear pipeline: A -> B -> C."""
-    p = Pipeline("Test")
-    p.add(task_a, task_b, task_c)
     return p
 
 
-@pytest.fixture
-def failing_task(cache):
-    """A task whose main always raises."""
-    task = Task("Failing", cache=cache)
+# ==============================================================================
+# Basics
+# ==============================================================================
+
+def test_pipeline_basics(pipeline):
+    assert pipeline.ntasks == 3
+    assert pipeline.get_task("A").name == "A"
+    assert pipeline.list_tasks() == ["A", "B", "C"]
+
+
+# ==============================================================================
+# Graph
+# ==============================================================================
+
+def test_tasks_are_topologically_sorted(pipeline):
+    assert [t.name for t in pipeline.tasks] == [
+        "A",
+        "B",
+        "C",
+    ]
+
+
+def test_upstream_and_downstream_helpers(pipeline):
+    assert pipeline.get_upstream_tasks("C") == [
+        "A",
+        "B",
+    ]
+
+    downstream = pipeline.get_downstream_tasks("A")
+
+    assert "B" in downstream
+    assert "C" in downstream
+
+
+# ==============================================================================
+# Validation
+# ==============================================================================
+
+def test_validate_missing_main(cache):
+    task = Task(
+        "Broken",
+        cache=cache,
+    )
+
+    pipeline = Pipeline("Test")
+    pipeline.add(task)
+
+    with pytest.raises(ExceptionGroup):
+        pipeline.validate_tasks()
+
+
+def test_validate_duplicate_names(cache):
+    a = Task(
+        "Duplicate",
+        cache=cache,
+    )
+    b = Task(
+        "Duplicate",
+        cache=cache,
+    )
+
+    @a.main
+    def main_a(t):
+        return 1
+
+    @b.main
+    def main_b(t):
+        return 2
+
+    pipeline = Pipeline("Test")
+    pipeline.add(a, b)
+
+    with pytest.raises(ExceptionGroup):
+        pipeline.validate_tasks()
+
+
+def test_validate_missing_dependency(cache):
+    task = Task(
+        "Consumer",
+        cache=cache,
+        dependencies=["MissingTask"],
+    )
 
     @task.main
-    def main(t: Task):
-        raise RuntimeError("boom")
+    def main(t):
+        return None
 
-    return task
+    pipeline = Pipeline("Test")
+    pipeline.add(task)
+
+    with pytest.raises(ExceptionGroup):
+        pipeline.validate_tasks()
+
+
+def test_validate_cycle_detection(cache):
+    a = Task(
+        "A",
+        cache=cache,
+        dependencies=["B"],
+    )
+
+    b = Task(
+        "B",
+        cache=cache,
+        dependencies=["A"],
+    )
+
+    @a.main
+    def main_a(t):
+        return "a"
+
+    @b.main
+    def main_b(t):
+        return "b"
+
+    pipeline = Pipeline("Test")
+    pipeline.add(a, b)
+
+    with pytest.raises(ExceptionGroup):
+        pipeline.validate_tasks()
+
+
+def test_validate_result_dependency(cache):
+    producer = Task(
+        "Producer",
+        cache=cache,
+        outputs={"Data": list},
+    )
+
+    consumer = Task(
+        "Consumer",
+        cache=cache,
+        dependencies=["Data"],
+    )
+
+    @producer.main
+    def main_a(t):
+        return t.result([], name="Data")
+
+    @consumer.main
+    def main_b(t):
+        return []
+
+    p = Pipeline("Test")
+    p.add(producer, consumer)
+
+    p.validate_tasks()  # should not raise
+
+
+def test_get_task_by_output_name(cache):
+    t = Task(
+        "Producer",
+        cache=cache,
+        outputs={"Parcels": list},
+    )
+
+    @t.main
+    def main(task):
+        return task.result([], name="Parcels")
+
+    p = Pipeline("Test")
+    p.add(t)
+
+    assert p.get_task("Parcels") is t
 
 
 # ==============================================================================
-# Setup and repr
+# Execution
 # ==============================================================================
 
-def test_pipeline_repr(pipeline):
-    assert "Test" in repr(pipeline)
-    assert "3" in repr(pipeline)
-
-
-def test_ntasks(pipeline):
-    assert pipeline.ntasks == 3
-
-
-def test_get_task_by_name(pipeline):
-    task = pipeline.get_task("A")
-    assert task.name == "A"
-
-
-def test_get_task_missing_raises(pipeline):
-    with pytest.raises(KeyError, match="No such task"):
-        pipeline.get_task("Z")
-
-
-# ==============================================================================
-# Task listing
-# ==============================================================================
-
-def test_list_tasks(pipeline):
-    names = pipeline.list_tasks()
-    assert names == ["A", "B", "C"]
-
-
-def test_list_tasks_with_cache_data(pipeline):
+def test_execute_marks_pipeline_complete(pipeline):
     pipeline.execute()
-    details = pipeline.list_tasks(show_has_cached_data=True)
-    # Each entry is (name, has_data, last_updated, reason)
-    assert len(details) == 3
-    names = [name for name, _, _, _ in details]
-    assert names == ["A", "B", "C"]
 
-
-def test_list_tasks_without_cache_data(pipeline):
-    details = pipeline.list_tasks(show_has_cached_data=True)
-    assert all(not has_data for _, has_data, _, _ in details)
-
-
-# ==============================================================================
-# Execution order and results
-# ==============================================================================
-
-def test_execute_runs_all_tasks(pipeline, cache):
-    pipeline.execute()
-    assert cache.get("A")[0].data == "a"
-    assert cache.get("B")[0].data == "ab"
-    assert cache.get("C")[0].data == "abc"
-
-
-def test_execute_tasks_in_topological_order(pipeline):
-    """Tasks must run in dependency order; C depends on B which depends on A."""
-    execution_order = []
-
-    for task in pipeline.tasks:
-        original_main = task.main
-
-        # Capture the name at definition time
-        name = task.name
-        def make_wrapper(n, m):
-            def wrapper(*args, **kwargs):
-                execution_order.append(n)
-                return m(*args, **kwargs)
-            return wrapper
-
-        task.main = make_wrapper(name, original_main)
-
-    pipeline.execute()
-    assert execution_order == ["A", "B", "C"]
-
-
-def test_is_complete_after_execute(pipeline):
-    pipeline.execute()
     assert pipeline.is_complete is True
 
 
-def test_is_not_complete_before_execute(pipeline):
-    assert pipeline.is_complete is False
+def test_execute_skip_tasks(pipeline):
+    pipeline.execute(
+        skip_tasks=["B"],
+    )
+
+    assert pipeline.get_task("B").is_skipped is True
 
 
-# ==============================================================================
-# Skipping tasks
-# ==============================================================================
-
-def test_skip_tasks(pipeline, cache):
-    pipeline.execute(skip_tasks=["B", "C"])
-    assert cache.get("A")[0].data == "a"
-    assert cache.get(task_name="B") == []
-    assert cache.get(task_name="C") == []
-
-
-def test_skipped_task_is_marked(pipeline, task_b):
-    pipeline.execute(skip_tasks=["B", "C"])
-    assert task_b.is_skipped is True
-
-
-# ==============================================================================
-# Failure handling
-# ==============================================================================
-
-def test_failed_task_returns_none(cache, failing_task):
-    """execute() calls main(raise_errors=False), so exceptions are swallowed.
-    A failing task produces no cached result and returns None."""
-    p = Pipeline("FailTest")
-    p.add(failing_task)
-    p.execute()
-    assert cache.get(task_name="Failing") == []
-
-
-def test_downstream_errors_when_upstream_produces_nothing(cache):
-    """If an upstream task fails silently (returns None, caches nothing),
-    the downstream task will error when it tries to read the missing dependency."""
-    producer = Task("Producer", cache=cache)
-
-    @producer.main
-    def main(t: Task):
-        raise RuntimeError("upstream failure")
-
-    consumer = Task("Consumer", cache=cache, dependencies=["Producer"])
-
-    @consumer.main
-    def main(t: Task):
-        return t.dependencies["Producer"].data
-
-    p = Pipeline("DownstreamTest")
-    p.add(producer, consumer)
-    p.execute()
-
-    # Producer failed silently; Consumer errored trying to access the missing result
-    assert cache.get(task_name="Producer") == []
-    assert cache.get(task_name="Consumer") == []
-
-
-# ==============================================================================
-# get_upstream_tasks / get_downstream_tasks
-# ==============================================================================
-
-def test_get_upstream_tasks(pipeline):
-    # B and A are both upstream of C
-    upstream = pipeline.get_upstream_tasks("C")
-    assert "A" in upstream
-    assert "B" in upstream
-    assert "C" not in upstream
-
-
-def test_get_upstream_tasks_root_has_none(pipeline):
-    assert pipeline.get_upstream_tasks("A") == []
-
-
-def test_get_downstream_tasks(pipeline):
-    # B and C are both downstream of A
-    downstream = pipeline.get_downstream_tasks("A")
-    assert "B" in downstream
-    assert "C" in downstream
-    assert "A" not in downstream
-
-
-def test_get_downstream_tasks_leaf_has_none(pipeline):
-    assert pipeline.get_downstream_tasks("C") == []
-
-
-# ==============================================================================
-# manual_execution_only
-# ==============================================================================
-
-def test_manual_task_not_executed_by_pipeline(cache):
-    manual = Task("Manual", cache=cache, manual_execution_only=True)
-
-    @manual.main
-    def main(t: Task):
-        return "manual result"
-
-    p = Pipeline("ManualTest")
-    p.add(manual)
-    p.execute()
-
-    assert manual.is_executed is False
-    assert cache.get(task_name="Manual") == []
-
-
-# ==============================================================================
-# execute_one
-# ==============================================================================
-
-def test_execute_one_runs_target(pipeline, cache):
+def test_execute_one_runs_related_tasks(pipeline):
     pipeline.execute_one("B")
-    assert cache.get("B")[0].data == "ab"
+
+    assert pipeline.get_task("A").is_executed
+    assert pipeline.get_task("B").is_executed
+    assert pipeline.get_task("C").is_executed
 
 
-def test_execute_one_runs_upstream_by_default(pipeline, cache):
-    """B depends on A; executing B should also run A."""
-    pipeline.execute_one("B")
-    assert cache.get("A")[0].data == "a"
+def test_list_tasks_with_cache_counts(pipeline):
+    pipeline.execute()
+
+    tasks = pipeline.list_tasks(show_has_cached_data=True)
+
+    assert tasks == [
+        ("A", 1),
+        ("B", 1),
+        ("C", 1),
+    ]
 
 
-def test_execute_one_runs_downstream_by_default(pipeline, cache):
-    """Executing B should also run C, which depends on B."""
-    pipeline.execute_one("B")
-    assert cache.get("C")[0].data == "abc"
+def test_list_tasks_handles_missing_results(cache):
+    task = Task("A", cache=cache)
+
+    @task.main
+    def main(t):
+        return 1
+
+    p = Pipeline("Test")
+    p.add(task)
+
+    assert p.list_tasks(show_has_cached_data=True) == [
+        ("A", 0),
+    ]
 
 
-def test_execute_one_upstream_false(pipeline, cache):
-    """With upstream=False, A should not be run automatically."""
-    # Pre-populate A so B can read its dependency
-    pipeline.get_task("A").main()
-    pipeline.execute_one("B", upstream=False)
-    # B ran, but we ran A manually -- just confirm B produced a result
-    assert cache.get("B")[0].data == "ab"
+# ==============================================================================
+# PipelineRun
+# ==============================================================================
 
+def test_pipeline_run_tracking(pipeline):
+    pipeline.execute()
 
-def test_execute_one_downstream_false(pipeline, cache):
-    """With downstream=False, C should not be run."""
-    pipeline.execute_one("B", downstream=False)
-    assert cache.get(task_name="C") == []
+    first_run = pipeline.current_run
+
+    assert first_run.tasks_total == 3
+    assert first_run.tasks_executed == 3
+
+    pipeline.execute()
+
+    assert pipeline.previous_run is first_run

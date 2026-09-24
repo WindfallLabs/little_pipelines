@@ -27,7 +27,6 @@ from ._hashing import hash_file, hash_files
 
 # ============================================================================
 # Status
-# ============================================================================
 
 class StatusState(StrEnum):
     CURRENT = "CURRENT"
@@ -80,7 +79,6 @@ class Status:
 
 # ============================================================================
 # Base Policy
-# ============================================================================
 
 class Policy(ABC):
     """
@@ -94,7 +92,6 @@ class Policy(ABC):
 
 # ============================================================================
 # Hash Policy
-# ============================================================================
 
 class HashPolicy(Policy):
     """
@@ -157,23 +154,29 @@ class HashPolicy(Policy):
 
 # ============================================================================
 # Future Policies
-# ============================================================================
 
-class ExpiryPolicy(Policy):
+class ExpiryPolicy(Policy): # WIP
     def check(self) -> Status:
         raise NotImplementedError(
             "ExpiryPolicy planned for a future release."
         )
 
 
-class CalendarCompletenessPolicy(Policy):
+class CalendarCompletenessPolicy(Policy): # WIP
     def check(self) -> Status:
         raise NotImplementedError("CalendarCompletenessPolicy planned for a future release.")
 
 
-class MultiPolicy(Policy):
+class MultiPolicy(Policy):  # WIP
     def __init__(self, *policies: Policy):
         self.policies = policies
 
     def check(self) -> Status:
         raise NotImplementedError("MultiPolicy planned for a future release.")
+
+
+__all__ = [
+    "Policy",
+    "Status",
+    "HashPolicy",
+]

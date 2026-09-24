@@ -142,3 +142,5 @@ class PipelineRun:
             f"{self.pipeline_name!r} "
             f"id={self.run_id[:8]}>"
         )
+
+__all__ = ["PipelineRun"]

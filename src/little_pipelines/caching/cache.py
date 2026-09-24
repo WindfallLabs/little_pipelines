@@ -1,15 +1,14 @@
 """
-Cache
-The persistence layer.
+Cache - Result persistence.
 """
 
 import datetime as dt
 import json
 import sqlite3
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Literal, Optional
 
+from ..exc import *
 from ..pipeline_run import PipelineRun
 from .result import Result
 from .serialize import Serializer, DefaultSerializer, StrSerializer
@@ -45,7 +44,17 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 
 
 class Cache:
+    """
+    The Cache object represents an SQLite database where Results and PipelineRuns are stored.
+    Its primary function is for sharing access to Results between Tasks.
+    """
     def __init__(self, database_path: str|Path = ":memory:"):
+        """
+        Initialize a Cache.
+
+        Args:
+            database_path (str or Path): Path to an SQLite database; default ':memory:'
+        """
         self._database_path = database_path
         self.database_path = database_path
         self._conn: Optional[sqlite3.Connection] = None
@@ -60,10 +69,13 @@ class Cache:
         self._serializers[str(bytes)] = self._default_serializer
         self._serializers[str(str)] = StrSerializer()
 
-    def _setup_database(self):
+    def _setup_database(self) -> None:
+        """
+        Ensures that all tables exist and options are set.
+        """
         if self._database_path in ("memory", ":memory:"):
             # Creates a shared in-memory database
-            self.database_path = "file:cachedb?mode=memory"  # &cache=shared
+            self.database_path = "file:cachedb?mode=memory"  # TODO: &cache=shared ?
             self.is_uri = True
         self._conn = sqlite3.connect(
             self.database_path,
@@ -76,18 +88,17 @@ class Cache:
 
         self._conn.executescript(_SETUP_DDL)
         self._conn.commit()
+        _ = self._conn.execute("VACUUM;").fetchall()
 
         return
 
     # ========================================================================
     # Results
 
-    def get(
-        self,
-        result_name: str,
-        return_raw_rows=False  # TODO: consider removing this
-    ) -> Result | list[dict[str, Any]]:
-        """Gets a Result from the cache."""
+    def get(self, result_name: str, return_raw_rows=False) -> Result | list[dict[str, Any]]:
+        """
+        Get a Result from the cache.
+        """
         # Allow * wildcards ('*' -> '%')
         result_name = result_name.replace("*", "%") if "*" in result_name else result_name
 
@@ -108,12 +119,15 @@ class Cache:
             )
         if len(results) == 0:
             if result_name not in self.keys():
-                raise sqlite3.OperationalError(f"No such table {result_name}")
+                #raise sqlite3.OperationalError(f"No such Result: {result_name}")
+                raise ResultNotFoundError(f"Not found: {result_name}")
 
         return results[0]
 
     def get_for_task(self, task_name: str) -> list[Result]:
-        """Returns all Results for a given Task."""
+        """
+        Return all Results for a given Task.
+        """
         # Allow * wildcards ('*' -> '%')
         task_name = task_name.replace("*", "%") if "*" in task_name else task_name
 
@@ -124,9 +138,6 @@ class Cache:
             .fetchall()
         )
 
-        #if return_raw_rows:
-        #    return [dict(r) for r in rows]
-
         results: list[Result] = []
         for row in rows:
             results.append(
@@ -135,14 +146,20 @@ class Cache:
 
         return results
 
-    def put(self, result: Result, mode="UPSERT"):
-        """Insert a Result into the cache."""
+    def put(self, result: Result, mode: Literal["UPSERT", "IGNORE", "FAIL"] = "UPSERT") -> None:
+        """
+        Insert a Result into the cache.
+
+        Args:
+            result
+            mode (
+        """
         if type(result) is not Result:
             raise TypeError("This method only accepts Result objects")
         serializer: Serializer = self.get_serializer(result.dtype)
         mode = mode.upper()
         if mode not in {'UPSERT', 'IGNORE', 'FAIL'}:
-            raise KeyError("Mode must be one of 'UPSERT', 'IGNORE', or 'FAIL'")
+            raise ValueError("Mode must be one of 'UPSERT', 'IGNORE', or 'FAIL'")
         if mode == "UPSERT":
             self._conn.execute(
                 """
@@ -161,18 +178,23 @@ class Cache:
                     self._to_row(result)
                 )
             except sqlite3.IntegrityError:
-                raise sqlite3.IntegrityError(f"{result.name} already in cache")
+                #raise sqlite3.IntegrityError(f"{result.name} already in cache")
+                raise ResultExistsError(f"Result exists in Cache: {result.name}")
         self._conn.commit()
 
         return
 
-    def keys(self):
-        """Return the names of data within the cache."""
+    def keys(self) -> list[str]:
+        """
+        Return the names of data within the cache.
+        """
         rows = self._conn.execute("SELECT name FROM cache").fetchall()
         return sorted([i[0] for i in rows])
 
     def clear(self, name: Optional[str] = None) -> bool:
-        """Clears a record from the cache, or rebuilds the cache table."""
+        """
+        Clear a record from the cache, or rebuilds the cache table.
+        """
         if name:
             name = name.replace("*", "%")
             try:
@@ -189,10 +211,9 @@ class Cache:
         else:
             _ = self._conn.execute("DROP TABLE cache;").fetchall()
             _ = self._setup_database()
-            _ = self._conn.execute("VACUUM;").fetchall()
             return True
 
-    def serializer(self, type_arg: type):
+    def serializer(self, type_arg: type) -> Callable:
         """
         Decorator to register a CacheSerializer subclass.
 
@@ -205,6 +226,8 @@ class Cache:
         Example:
             ```
             import sys
+
+            cache = Cache("cache.sqlite")
 
             @cache.serializer(str)
             class StrSerializer(Serializer):
@@ -235,11 +258,16 @@ class Cache:
         return decorator
 
     def get_serializer(self, dtype: str) -> Serializer:
-        """Return a data serializer."""
+        """
+        Return a data serializer.
+        """
         return self._serializers.get(dtype, self._default_serializer)
 
 
     def _to_row(self, result: Result) -> tuple:
+        """
+        Prepares a Result for insert by serializing data and converting data to a tuple.
+        """
         serializer = self.get_serializer(result.dtype)
         return (
             result.name,
@@ -252,8 +280,11 @@ class Cache:
         )
 
     def _from_row(self, row) -> Result:
+        """
+        Convert
+        """
         serializer = self.get_serializer(row["dtype"])
-        return Result(
+        r = Result(
             name=row["name"],
             task_name=row["task"],
             data=serializer.loads(row["data"]),
@@ -263,8 +294,12 @@ class Cache:
             extra=json.loads(row["extra"]),
         )
 
-    def close(self):
-        """Close the database connection."""
+        return r
+
+    def close(self) -> None:
+        """
+        Close the database connection.
+        """
         self._conn.close()
         return
 
@@ -382,3 +417,7 @@ class Cache:
         self._conn.commit()
 
         return
+
+
+__all__ = ["Cache"]
+

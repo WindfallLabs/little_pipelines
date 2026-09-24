@@ -1,5 +1,5 @@
 """
-Define how datatypes get serialized before caching.
+Serialize - Define how data gets serialized for caching.
 """
 
 import pickle
@@ -9,43 +9,24 @@ from typing import Any
 
 
 class Serializer(ABC):
+    """
+    Abstract Base Class for data serializers
+    """
     @classmethod
     @abstractmethod
     def dumps(self, data: Any) -> bytes:
+        """
+        Define how to pickle data.
+        """
         ...
 
     @classmethod
     @abstractmethod
     def loads(self, data: bytes) -> Any:
+        """
+        Define how to unpickle data.
+        """
         ...
-
-
-CacheSerializer = Serializer
-
-
-# class DefaultSerializer(CacheSerializer):
-#     """Defines the default caching (using pickle)."""
-#     def dumps(self, data: Any) -> bytes:
-#         """Pickle data."""
-#         return pickle.dumps(data)
-
-#     def loads(self, data: bytes) -> Any:
-#         """Unpickle data."""
-#         return pickle.loads(data)
-
-
-# class StrSerializer(CacheSerializer):
-#     def dumps(self, data: str, encoding: Optional[str] = None) -> bytes:
-#         """Defines how strings get written to the cache."""
-#         if not encoding:
-#             encoding = sys.getdefaultencoding()
-#         return data.encode(encoding)
-
-#     def loads(self, data: bytes, encoding: Optional[str] = None) -> str:
-#         """Defines how strings get read from the cache."""
-#         if not encoding:
-#             encoding = sys.getdefaultencoding()
-#         return data.decode(encoding)
 
 
 class DefaultSerializer(Serializer):
@@ -69,3 +50,10 @@ class StrSerializer(Serializer):
         """Defines how strings get read from the cache."""
         encoding = sys.getdefaultencoding()
         return data.decode(encoding)
+
+
+__all__ = [
+    "Serializer",
+    "DefaultSerializer",
+    "StrSerializer"
+]

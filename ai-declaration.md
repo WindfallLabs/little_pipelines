@@ -1,14 +1,13 @@
 ---
 version: "0.1.1"
-level: assist
+level: pair
 components:
-  tests/test_cache.py
-  tests/test_pipeline.py
-  tests/test_tasks.py
+  tests/*
 ---
 
 This format is based on [AI-DECLARATION.md](https://ai-declaration.md/en/0.1.1).
 
 ## Notes
 
-- Claude Sonnet 4.6 was used to generate tests that were proofed and edited manually
+- Microsoft Copilot was used to generate tests, which are planned to be reviewed manually
+- Copilot was also used to detect and squash bugs in many other files; all proposed code has been reviewed manually

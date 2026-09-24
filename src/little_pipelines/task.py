@@ -1,22 +1,21 @@
 """
-Tasks
+Tasks - The Workers.
 """
 
 import datetime as dt
 import inspect
 from collections.abc import Callable, Sequence
-from contextlib import contextmanager
 from functools import wraps
-from time import perf_counter_ns
 from types import ModuleType
 from typing import Any, Optional, Literal, Self, TYPE_CHECKING
 
 from . import _autodoc, util
 from .caching import Cache, Result
 from .data import Data
-from .exc import PipelineNotSetError, DependencyNotFoundError
 from ._hashing import hash_file, hash_files
 from .messaging import get_logger
+from .exc import *  # TODO: be explicit
+
 
 if TYPE_CHECKING:
     from ._pipeline import Pipeline
@@ -46,12 +45,7 @@ class DependencyDict(dict):
         if d is None:
             d = {}
         super().__init__(d)
-    
-    # def __get__(self, obj, objtype=None):
-    #     if obj is None:
-    #         return self
-    #     return self
-    
+
     def __getitem__(self, key):
         try:
             return super().__getitem__(key)
@@ -117,6 +111,8 @@ class Task:
         self._skipped = False
         self._has_errors = False
 
+        self._main_func: Callable | None = None
+
         # Overridables
         self._cache_read_callback = self._default_cache_read_callback
 
@@ -130,7 +126,6 @@ class Task:
 
         # Pipeline
         self._pipeline: Optional["Pipeline"] = None
-        self._quiet = True  # Task-specific
         self._raise_errors = True
         # Initialize the cache stuff ....
         self.cache: Cache = cache
@@ -160,6 +155,9 @@ class Task:
 
     @property
     def _script_hash(self):
+        """
+        SHA256 has of the Python file containing the Task.
+        """
         try:
             return hash_file(self.script_path)
         except:
@@ -167,19 +165,27 @@ class Task:
 
     @property
     def name(self) -> str:
-        """Task name"""
+        """
+        Task name.
+        """
         return self._name
 
     @property
     def is_executed(self) -> bool:
+        """
+        """
         return self._executed and not self._has_errors
 
     @property
     def is_skipped(self):
+        """
+        """
         return self._skipped
 
     @is_skipped.setter
     def is_skipped(self, value: bool):
+        """
+        """
         try:
             #self.logger.warn(self.name, f"Skipped {value}")
             True  # TODO: not sure what callback is useful here
@@ -188,12 +194,20 @@ class Task:
         self._skipped = value
 
     @property
+    def has_main(self):
+        return self._main_func is not None
+
+    @property
     def dependency_names(self):
+        """
+        """
         return self._dependency_names
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
-        """Results of upstream Tasks that this Task depends on."""
+        """
+        Results of upstream Tasks that this Task depends on.
+        """
         # Create _dependencies if it is None
         if not self._dependencies:
             deps: dict[str, Any] = {}
@@ -201,7 +215,7 @@ class Task:
                 try:
                     dep: Result = self.cache.get(d)
                     deps[d] = dep
-                except IndexError:
+                except ResultNotFoundError:
                     raise DependencyNotFoundError(f"'{d}' not in cache")
 
             self._dependencies = DependencyDict(deps)
@@ -210,6 +224,9 @@ class Task:
 
     @property
     def pipeline(self):
+        """
+        Reference to the Pipeline.
+        """
         return self._pipeline
 
     @pipeline.setter
@@ -246,17 +263,10 @@ class Task:
 
         # Default Task output behavior
         if outputs is None:
-            return {
-                self.name: {
-                    "dtype": Any,
-                    "validator": None,
-                    "data": None,
-                }
-            }
+            return {}
 
         # ---------------------------------------------------------
         # Data objects
-        # ---------------------------------------------------------
 
         if isinstance(outputs, list):
             specs: dict[str, dict[str, Any]] = {}
@@ -281,7 +291,6 @@ class Task:
 
         # ---------------------------------------------------------
         # Legacy dict[str, type]
-        # ---------------------------------------------------------
 
         if isinstance(outputs, dict):
             specs: dict[str, dict[str, Any]] = {}
@@ -323,6 +332,9 @@ class Task:
         ExceptionGroup
             One or more output validation failures.
         """
+        if self._output_specs == {}:
+            return
+
         errors: list[Exception] = []
         expected = self._output_specs
         actual = {result.name: result for result in results}
@@ -372,7 +384,7 @@ class Task:
                     str(dtype),
                 )
                 errors.append(
-                    OutputTypeError(
+                    TaskOutputValidationError(
                         f"Output '{output_name}' "
                         f"returned "
                         f"{type(result.data).__name__}; "
@@ -392,7 +404,7 @@ class Task:
                     data_obj.validate(result.data)
                 except Exception as e:
                     errors.append(
-                        OutputTypeError(
+                        TaskOutputValidationError(
                             f"Validation failed for '{output_name}': {e}"
                         )
                     )
@@ -433,12 +445,6 @@ class Task:
             details (bool): Returns the result as a Result
             run_if_not_cached (bool): Runs the task if the results are not already cached and returns the results of that process
         """
-        # TODO: run on demand?
-        #if run_if_not_cached and (not self.cache or self.name not in self.cache.keys()):
-        #    return self.run(**run_kwargs)
-        #else:
-        #    r: Result = self.cache.get(self.name)
-        
         results: list[Result] | dict[str, Result]
         results = self.cache.get_for_task(self.name)
         if named:
@@ -446,16 +452,23 @@ class Task:
         return results
 
     def _default_cache_read_callback(self, cached_result: Result) -> Any:
-        """The default cache-read callback."""
+        """
+        The default cache-read callback.
+        """
         return cached_result.data
 
     def on_cache_read(self, func: Callable):
-        """Decorator used to override the cache-read callback."""
+        """
+        Decorator used to override the cache-read callback.
+        """
         from types import MethodType
         self._cache_read_callback = MethodType(func, self)
         return func
 
     def cache_read_callback(self, cached_result: Result):
+        """
+        Allow a user-defined function to fire after reading data from the Cache.
+        """
         return self._cache_read_callback(cached_result)
 
     def get_info(self) -> tuple[str, str]:
@@ -465,25 +478,29 @@ class Task:
         return (self._g.get("__doc__"), _autodoc(self))
 
     # TODO: rename to _get_task and allow it to get tasks outside of dependencies
-    def get_dependency(self, task_name: str) -> "Task":
-        """
-        Gets a dependency (Task object).
+    # TODO: or remove
+    # def get_dependency(self, task_name: str) -> "Task":
+    #     """
+    #     Gets a dependent Task object.
         
-        Args:
-            task_name (str): The name of the Task to retrieve
-        """
-        if not self.pipeline:
-            raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
-        try:
-            return self.dependencies[task_name]
-        except KeyError:
-            raise KeyError(f"{task_name} is not a dependency of {self.name}")
+    #     Args:
+    #         task_name (str): The name of the Task to retrieve
+    #     """
+    #     if not self.pipeline:
+    #         raise PipelineNotSetError(f"Dependencies of Task '{self.name}' cannot be determined without a Pipeline")
+    #     try:
+    #         #return self.dependencies[task_name]
+    #         return self.pipeline.get_task(task_name)
+    #     except KeyError:
+    #         raise KeyError(f"{task_name} is not a dependency of {self.name}")
 
     # ========================================================================
     # Decorators
 
     def process(self, func: Callable) -> None:
-        """Wrapper for method-like custom functions."""
+        """
+        Wrapper for method-like custom functions.
+        """
         @wraps(func)
         def _process_wrapper(*args, **kwargs) -> Any:
             self.logger.process_start(self.name, func.__name__)
@@ -504,8 +521,7 @@ class Task:
             raise AttributeError("No cache set.")
 
         results: tuple[Any] = tuple([r.data for r in self.cache.get(task_name=self.name)])
-        #if len(results) == 1:
-        #    results: Any = results[0]
+
         return results
 
     def _resultify(self, return_values: Any) -> tuple[Result]:
@@ -534,7 +550,7 @@ class Task:
         # Check result names for uniqueness
         result_names: list[str] = [r.name for r in results]
         if len(set(result_names)) != len(result_names):
-            raise ValueError("Multiple Results have the same name")
+            raise DuplicateResultsError(f"Multiple Results have the same name: {result_names}")
 
         unpacked_data: list[Any] = []
         return_data: Any | tuple[Any]
@@ -561,15 +577,16 @@ class Task:
 
         kwargs that can be passed to the user-function:
             force (bool): Force the execution of the task (default True)
-            quiet (bool): 
             raise_errors (bool): 
         """
+
         @wraps(func)
         def _main_wrapper(*args, **kwargs) -> Any | tuple[Any]:
-            """Little Pipelines' secret sauce."""
+            """
+            Little Pipelines' secret sauce.
+            """
             kwargs_allowed = [
                 "force",
-                "quiet",
                 "raise_errors",
             ]
             self.logger.task_start(self.name)
@@ -580,12 +597,6 @@ class Task:
             force: bool = kwargs.get("force", True)
             if force not in (True, False):
                 raise AttributeError("'force' kwarg must be bool")
-            # Optionally quiet a task
-            quiet: bool = kwargs.get("quiet", True)
-            if quiet not in (True, False):
-                raise AttributeError("'quiet' kwarg must be bool")
-            if quiet != self._quiet:
-                self._quiet = quiet
             # Ignoring errors allows the pipeline to continue running if some tasks fail
             raise_errors: bool = kwargs.get("raise_errors", True)
             if raise_errors not in (True, False):
@@ -631,12 +642,15 @@ class Task:
 
                 return unpacked_data
 
+        self._main_func = func
         setattr(self, "main", _main_wrapper)
         return
-
 
     # ========================================================================
     # Dunders
 
     def __repr__(self):
         return f"<Task ('{self._name}')>"
+
+
+__all__ = ["find_tasks", "Task"]

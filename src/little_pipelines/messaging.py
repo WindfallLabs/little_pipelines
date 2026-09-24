@@ -40,18 +40,36 @@ import logging
 import queue
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.style import Style
+from rich.text import Text
+from rich.highlighter import NullHighlighter
+
+
+# ============================================================================
+# Options / Config
+
+DEFAULT_TASK_NAME_LEN = 25
+
+
+class Verbosity(Enum):
+    QUIET = logging.WARNING
+    NORMAL = logging.INFO
+    VERBOSE = logging.DEBUG
+
+    @property
+    def level(self) -> int:
+        return self.value
 
 
 # ============================================================================
 # Theme Definitions
-# ============================================================================
-
 
 @dataclass(frozen=True)
 class MessageTheme:
@@ -148,8 +166,6 @@ SHELL_FAIL = MessageTheme(
 
 # ============================================================================
 # Formatter
-# ============================================================================
-
 
 class LPFormatter(logging.Formatter):
     """
@@ -167,7 +183,7 @@ class LPFormatter(logging.Formatter):
     default_time_format = "%Y-%m-%d %H:%M:%S.%f"
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = (
+        timestamp: str = (
             dt.datetime.fromtimestamp(record.created)
             .strftime(self.default_time_format)[:-3]
         )
@@ -196,48 +212,43 @@ class LPFormatter(logging.Formatter):
         task_width = getattr(
             record,
             "task_width",
-            20,
+            DEFAULT_TASK_NAME_LEN,
         )
 
+        level_colors = {"WARNING": "yellow", "ERROR": "red"}
+        level_part = f"[{level_colors.get(record.levelname, 'bright_black')}]{record.levelname:<8}[/]"
         time_part = (
-            #f"[bright_black][{timestamp}][/]"
-            f"[bright_black]" + timestamp + "[/]"
+            f"[bright_black][{timestamp}][/]"
         )
-
         task_part = f"  [{task_style}]{task.ljust(task_width)}[/]"
-
-        level_part = f"[{level_style}] :{event.center(6)}:[/]"
-
+        status_level = f"[{level_style}] :{event.center(6)}:[/]"
         msg_part = f"[{message_style}] {record.getMessage()}[/]"
 
         return (
-            time_part
+            level_part
+            + time_part  # NOTE: requires NullHighlighter
             + task_part
-            + level_part
+            + status_level
             + msg_part
         )
 
 
 # ============================================================================
 # Logger Wrapper
-# ============================================================================
-
 
 class LPLogger:
     """
-    Framework-facing logger wrapper.
-
-    Users should never need to interact with
-    Python logging directly.
-
-    Tasks and Pipelines should use this API.
+    Little Pipelines logger.
     """
 
     def __init__(
         self,
         name: str = "little_pipelines",
+        task_name_width: int = DEFAULT_TASK_NAME_LEN
     ):
         self.name = name
+        self._task_name_len = task_name_width
+        self.enabled = True
         self.console = Console()
         self._started = False
         self._queue: queue.Queue = queue.Queue()
@@ -245,10 +256,51 @@ class LPLogger:
         self._logger = logging.getLogger(self.name)
         self._logger.setLevel(logging.INFO)
         self._logger.propagate = False
+        self._verbosity = Verbosity.NORMAL
 
-    # ------------------------------------------------------------------
+    # ========================================================================
+    # Config
+
+    def set_max_task_name_len(self, width: int = 25) -> None:
+        """
+        Set the maximum Task name spacing.
+        """
+        self._task_name_len = width
+        return
+
+    def set_verbosity(self, verbosity: Literal["quiet", "normal", "verbose"] = "normal") -> None:
+        """
+        Set the verbosity of the logger.
+
+        This works by setting the logging level vis-a-vi the Verbosity enum.
+        """
+        verbosity = verbosity.upper()
+
+        if verbosity == "QUIET":
+            self._verbosity = Verbosity.QUIET
+            self.console.quiet = True
+        else:
+            self._verbosity = Verbosity.NORMAL
+            self.console.quiet = False
+        self._logger.setLevel(Verbosity[verbosity].level)
+        return
+
+    @property
+    def quiet(self) -> bool:
+        return self._verbosity == Verbosity.QUIET
+    
+    @quiet.setter
+    def quiet(self, do_quiet: bool):
+        if do_quiet is True:
+            self.set_verbosity("quiet")
+        else:
+            self.set_verbosity("normal")
+        return
+
+
+
+    # ========================================================================
     # Setup
-    # ------------------------------------------------------------------
 
     def start(self, log_file: Optional[str | Path] = None) -> None:
         if self._started:
@@ -264,6 +316,8 @@ class LPLogger:
             show_path=False,
             show_time=False,
             rich_tracebacks=True,
+            show_level=False,  # Controls the leading log-level
+            highlighter=NullHighlighter(),  # NOTE: critical for forcing Rich to honor our styling
         )
         rich_handler.setFormatter(LPFormatter())
         handlers = [rich_handler]
@@ -297,9 +351,8 @@ class LPLogger:
             self._listener.stop()
         self._started = False
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Internal
-    # ------------------------------------------------------------------
 
     def _ensure_started(self):
         if not self._started:
@@ -312,6 +365,8 @@ class LPLogger:
         task: str = "",
         theme: MessageTheme = INFO,
     ):
+        if self.enabled is False:
+            return
 
         self._ensure_started()
         self._logger.log(
@@ -323,12 +378,12 @@ class LPLogger:
                 "task_style": theme.task_style,
                 "level_style": theme.level_style,
                 "message_style": theme.message_style,
+                "task_width": self._task_name_len,
             },
         )
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # General Logging
-    # ------------------------------------------------------------------
 
     def info(self, msg: str, task: str = "", ):
         self._emit(
@@ -359,9 +414,8 @@ class LPLogger:
         with self.console.status(status_msg):
             yield
 
-    # ------------------------------------------------------------------
+    # ========================================================================
     # Task Helpers
-    # ------------------------------------------------------------------
 
     def task_start(self, task: str, msg: str | None = None, ):
         self._emit(
@@ -438,7 +492,6 @@ class LPLogger:
 
 # ============================================================================
 # Singleton Access
-# ============================================================================
 
 _GLOBAL_LOGGER: Optional[LPLogger] = None
 
@@ -455,3 +508,6 @@ def get_logger() -> LPLogger:
         _GLOBAL_LOGGER = LPLogger()
 
     return _GLOBAL_LOGGER
+
+
+__all__ = ["get_logger", "LPLogger"]

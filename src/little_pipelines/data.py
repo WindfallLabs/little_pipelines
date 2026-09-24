@@ -1,4 +1,6 @@
 """
+Data - Define and document data.
+
 A Data object represents a conceptual dataset and definition.
 It's optional, but highly recommended for documentation. It's a feature for the advanced beta-testers.
 
