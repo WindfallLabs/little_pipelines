@@ -1,3 +1,8 @@
+![Tests](dev/tests-badge.svg)
+![Coverage Status](dev/coverage-badge.svg)
+[![AI-DECLARATION: pair](https://img.shields.io/badge/䷼%20AI--DECLARATION-pair-ffedd5)](https://ai-declaration.md)
+
+
 # Little Pipelines
 
 ## tl;dr
@@ -9,19 +14,17 @@ A small, Python-native, local-first data processing toolkit built specifically f
 Our goal is to provide a small set of tools that analysts can use to build reliable and intuitive data processing workflows that are entirely Python-driven.  
 Little Pipelines centers around these simple objects:  
 
-- **Data**: documented dataset definitions
-- **Task**: basic units of work; function-based
+- **Data**: Documented dataset definitions
+- **Task**: Basic units of work; function-based
 - **Cache**: SQLite-backed storage for artifacts (Results) that created by and shared between Tasks
 - **Pipeline**: Task orchestrator and dependency manager
-- **Shell**: an interactive shell/workspace
+- **Shell**: An interactive shell/workspace; customizable via subclassing
 
 
-## Examples
-
+## Little Pipelines in action
 
 ### Example 1: Simple Task, if not a little stupid
 
-___FAILS___
 ```python
 
 import little_pipelines as lp
@@ -37,10 +40,10 @@ hello = lp.Task(
 )
 
 
-# Define the work that the task will do
-@hello.main
+# Define the work that the task will do as a wrapped function
+@hello.main  # Essentially makes the function a method, with added magic
 def main(task):
-    return "Hello World"
+    return "Hello World"  # Return some result
 
 
 # Create the pipeline and add the Task
@@ -54,7 +57,7 @@ pipeline.execute()
 # Get the result of the task
 r: lp.Result = cache.get("Hello")
 
-print(r.data)  # "Hello World"
+print(r.data)  # Unpack the data from the Result: "Hello World"
 
 ```
 
@@ -107,6 +110,7 @@ pipeline = lp.Pipeline(
     cache=cache,
 )
 
+# The order in which you add Tasks doesn't matter
 pipeline.add(
     load_sales,
     summarize_sales,
@@ -121,15 +125,26 @@ print(cache.get("SummarizeSales").data)  # "{'records': 3, 'total_sales': 525}"
 
 ### Example 3: Best practice, if not over-engineered
 
+___NOTE: this is currently executing PrepareRidership twice___
+
 ```python
 
-import pandas as pd
+# ============================================================
+# my_cache.py
 
 import little_pipelines as lp
 
+cache = lp.Cache()
+
 
 # ============================================================
-# Data Definitions
+# my_data.py
+
+import pandas as pd
+import little_pipelines as lp
+
+#from my_cache import cache
+
 
 raw_ridership = lp.Data(
     "RawRidership",
@@ -144,14 +159,22 @@ monthly_ridership = lp.Data(
 )
 
 
+@monthly_ridership.getter
+def get(self):
+    # This is a lazy way but works
+    return cache.get("MonthlyRidership").data
+
+
 # ============================================================
-# Shared Cache
+# my_tasks/prepare_ridership.py
 
-cache = lp.Cache()
+import pandas as pd
 
+import little_pipelines as lp
 
-# ============================================================
-# Task 1
+#from my_cache import cache
+#from my_data import raw_ridership
+
 
 prepare_ridership = lp.Task(
     "PrepareRidership",
@@ -198,7 +221,12 @@ def main(task):
 
 
 # ============================================================
-# Task 2
+# my_tasks/build_ridership_report.py
+
+import little_pipelines as lp
+
+#from my_cache import cache
+
 
 build_report = lp.Task(
     "BuildRidershipReport",
@@ -251,7 +279,20 @@ def main(task):
 
 
 # ============================================================
-# Pipeline
+# my_tasks/__init__.py
+
+#from prepare_ridership.py import prepare_ridership
+#from build_ridership_report.py import build_report
+
+
+# ============================================================
+# pipeline.py
+
+import little_pipelines as lp
+
+#from my_cache import cache
+#from my_tasks import build_report, prepare_ridership
+
 
 pipeline = lp.Pipeline(
     "RidershipReporting",
@@ -269,7 +310,13 @@ pipeline.execute()
 # ============================================================
 # Proof
 
-df: pd.DataFrame = cache.get("MonthlyRidership").data
+import pandas as pd
+
+#from my_data import monthly_ridership
+
+
+# Use the user-defined getter
+df: pd.DataFrame = monthly_ridership.get()
 print(df)
 
 ```

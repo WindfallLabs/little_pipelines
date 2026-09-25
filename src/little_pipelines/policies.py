@@ -1,5 +1,6 @@
 """
 Policies
+_This WIP feature was designed by Copilot (AI) and is pending human review and refactoring_
 
 Policies determine the status of a dataset, evaluate state; they never mutate framework objects.
 
