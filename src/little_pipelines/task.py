@@ -623,9 +623,10 @@ class Task:
 
                 # Process the returned data as result objects
                 unpacked_data: Any | tuple[Any] = self._cache_and_return_result_data(results)
-                self._executed = True
+            self._executed = True
+            self.logger.task_complete(self.name, _t)
 
-                return unpacked_data
+            return unpacked_data
 
         self._main_func = func
         self.main = _main_wrapper

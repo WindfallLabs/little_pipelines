@@ -1,213 +1,292 @@
-# Little Pipelines - A Lightweight Task Pipeline Framework
+# Little Pipelines
 
-__This document is a work-in-progress__  
-
-Little Pipelines is a Python library for building and executing data pipelines. It provides an intuitive approach to orchestrating tasks while maintaining minimal dependencies and complexity. Its decorator syntax allows users to mix ETL operations, SQL transformations, API calls, file operations, and whatever else needs to get done without having to   
-
-This library is intended for individual analysts or small teams who need simple data processing pipelines without the complexities or costs of enterprise tools or cloud-based ETL platforms (e.g., Luigi, Airflow, Prefect, dbt, Dagster, etc.).  
-
-Free and Open Source under the [MIT License](https://mit-license.org/), and built with the love and support of the [Missoula Urban Transporation District](https://mountainline.com/about/).  
+## tl;dr
+A small, Python-native, local-first data processing toolkit built specifically for solo analysts or small teams who need more structure than just a collection of scripts (but not the complexity of enterprise orchestration platforms).  
 
 
-## Key Features
+## Details
 
-- __Minimal 3rd party library dependencies__ - 
-- __Intelligent Execution__ - Tasks may conditionally execute based on input files, script hashes, and freshness of cached data
-- __Automatic dependency resolution__ - Declare Task dependencies by name and let the pipeline handle execution order
-- __Declarative task/process definitions__ - Define Pythonic Task functions without worrying about what's going on under the hood
-- __Cached results__ - Cache the results and control when they expire
-- __Built-in performance tracking__ - Process execution timing for each task's execution
-- __Optional interactive shell__ - Subclassable `Shell` class for building custom CLI tools (work-in-progress)
+Our goal is to provide a small set of tools that analysts can use to build reliable and intuitive data processing workflows that are entirely Python-driven.  
+Little Pipelines centers around these simple objects:  
+
+- **Data**: documented dataset definitions
+- **Task**: basic units of work; function-based
+- **Cache**: SQLite-backed storage for artifacts (Results) that created by and shared between Tasks
+- **Pipeline**: Task orchestrator and dependency manager
+- **Shell**: an interactive shell/workspace
 
 
-## Some Super Simple Examples
+## Examples
 
-### Example 1
 
+### Example 1: Simple Task, if not a little stupid
+
+___FAILS___
 ```python
-from time import sleep
 
 import little_pipelines as lp
 
 
+# Initialize a cache to persist results
 cache = lp.Cache()
 
-
-# =====================================
-# Task 1
-
-task1 = lp.Task("TaskOne", cache=cache)
-
-@task1.main
-def main(this):
-    sleep(0.1)  # Emulate processing time
-    return 1
-
-
-# =====================================
-# Task 2
-
-task2 = lp.Task("TaskTwo", cache=cache)
-
-@task2.process
-def extract(this):
-    """A sub-process"""
-    sleep(1.5)  # Emulate processing time
-    return 1
-
-@task2.process
-def transform(this, ext: int):
-    """A sub-process"""
-    sleep(1)  # Emulate processing time
-    return ext + 1
-
-@task2.main
-def main(this):
-    raw_data = this.extract()
-    data = this.transform(raw_data)
-    return data
-
-
-# =====================================
-# Task 3
-
-task3 = lp.Task(
-    "TaskThree",
-    cache=cache
+# Define the task
+hello = lp.Task(
+    "Hello",
+    cache=cache,  # Persist the results
 )
 
-@task3.main
-def main(this):
-    sleep(.3)  # Emulate processing time
-    return 3
+
+# Define the work that the task will do
+@hello.main
+def main(task):
+    return "Hello World"
 
 
-# =====================================
-# Combine them all
+# Create the pipeline and add the Task
+pipeline = lp.Pipeline("Example Pipeline")
+pipeline.add(hello)
 
-sum_task = lp.Task(
-    "Sum",
-    dependencies=["TaskOne", "TaskTwo", "TaskThree"],
-    cache=cache
-)
-
-@sum_task.main
-def main(this):
-    sleep(.25)  # Emulate processing time
-    r1 = this.dependencies["TaskOne"].data
-    r2 = this.dependencies["TaskTwo"].data
-    r3 = this.dependencies["TaskThree"].data
-    return r1 + r2 + r3
-
-
-# =====================================
-# Run it
-
-pipeline = lp.Pipeline("Example1", cache=cache)
-pipeline.add(task1, task2, task3, sum_task)
+# Execute the pipeline
+# This sorts Tasks and calls the `main` method of each (like defined above)
 pipeline.execute()
 
-print("Final Result: ", pipeline.cache.get("Sum")[0].data)  # 6
+# Get the result of the task
+r: lp.Result = cache.get("Hello")
+
+print(r.data)  # "Hello World"
 
 ```
 
 
-## The Big Picture
-
-In short, Little Pipelines lets you mix ETL operations, SQL transformations, Python data processing, API calls, and file operations in a single pipeline. First, users define `Tasks` and `add()` them to a `Pipeline`.  
-Under the hood, the Pipeline coordinates Task execution using Python's `graphlib.TopologicalSorter`, and handles the caching of results using. Tasks are automatically configured with a [loguru](https://loguru.readthedocs.io/en/stable/overview.html) file-logger which logs to `.little_pipelines/<pipeline_name>/logs` (located in your user or home directory).  
-
-Tasks can have dependencies (require the execution of other tasks before it). Dependencies are explicitly listed by name at the initialization of Tasks. Dependency management (topological sorting) is done automatically by the Pipeline instances's `tasks` property. So you could skip the built-in `execute()` method and hack something as dead-simple as:
+### Example 2: Two Tasks, mild complexity
 
 ```python
-for task in pipeline.tasks:
-    task.main()
-```
 
-## Some Comparisons
-
-### Little Pipelines vs. Luigi
-
-___Luigi___
-```python
-import luigi
-
-
-class Task1(luigi.Task):
-    def run(self):
-        with self.output().open('w') as f:
-            f.write('1')
-
-    def output(self):  # Save output for other processes
-        return luigi.LocalTarget('output.txt')
-
-
-class Task2(luigi.Task):
-    def requires(self):
-        return Task1()  # Set the upstream dependency
-    
-    def run(self):
-        # Read the output from WaitAndReturn
-        with self.input().open('r') as f:
-            value = int(f.read())
-        
-        # Do something with it
-        result = value + 1
-        
-        with self.output().open('w') as f:
-            f.write(str(result))
-    
-    def output(self):
-        return luigi.LocalTarget('processed_output.txt')
-        # NOTE: if using SqliteTarget there's a lot of boilerplate to get parody with little pipelines
-
-
-if __name__ == '__main__':
-    luigi.build([Task2()], local_scheduler=True)  # Run the tasks
-    print(int(Task2().output().open().read()))
-
-```
-
-___Little Pipelines___
-```python
 import little_pipelines as lp
 
-# A universal, in-memory or on-disk place for storing task outputs
 cache = lp.Cache()
 
-# A task
-task1 = lp.Task(
-    "TaskOne",
-    cache=cache
-)
-
-
-@task1.main   # Decorator syntax provides a "classless" API
-def main(this):
-    return 1  # Save output for other processes (handled silently using the cache)
-
-
-# A task dependent on the execution of another task
-task2 = lp.Task(
-    "TaskTwo",
+load_sales = lp.Task(
+    "LoadSales",
     cache=cache,
-    dependencies=["TaskOne"]  # Specify dependencies
+)
+
+@load_sales.main
+def main(task):
+    return lp.Data(task.name).fulfill([
+        {"amount": 100},
+        {"amount": 250},
+        {"amount": 175},
+    ])
+
+
+summarize_sales = lp.Task(
+    "SummarizeSales",
+    cache=cache,
+    dependencies=["LoadSales"],
 )
 
 
-@task2.main
-def main(this):
-    value = this.dependencies["TaskOne"].data  # Access the result of another upstream task
-    return value + 1
+@summarize_sales.main
+def main(task):
+    # Load the Result of another Task
+    sales = task.dependencies["LoadSales"].data
+
+    total = sum(row["amount"] for row in sales)
+
+    # Return named results
+    return lp.Data(task.name).fulfill({
+        "records": len(sales),
+        "total_sales": total,
+    })
 
 
-if __name__ == '__main__':
-    pipeline = lp.Pipeline(
-        "MyPipeline",  # Pipeline name
-        cache=cache    # Access to the shared cache
-    )
-    pipeline.add(task2, task1)  # Order doesn't matter
-    pipeline.execute()  # Run it (this topologically sorts tasks)
-    print(pipeline.cache.get("TaskTwo")[0].data)
+pipeline = lp.Pipeline(
+    "SalesSummary",
+    cache=cache,
+)
+
+pipeline.add(
+    load_sales,
+    summarize_sales,
+)
+
+pipeline.execute()
+
+print(cache.get("SummarizeSales").data)  # "{'records': 3, 'total_sales': 525}"
 
 ```
+
+
+### Example 3: Best practice, if not over-engineered
+
+```python
+
+import pandas as pd
+
+import little_pipelines as lp
+
+
+# ============================================================
+# Data Definitions
+
+raw_ridership = lp.Data(
+    "RawRidership",
+    dtype=pd.DataFrame,
+    doc="Raw APC export from the transit agency."
+)
+
+monthly_ridership = lp.Data(
+    "MonthlyRidership",
+    dtype=pd.DataFrame,
+    doc="Cleaned monthly ridership totals."
+)
+
+
+# ============================================================
+# Shared Cache
+
+cache = lp.Cache()
+
+
+# ============================================================
+# Task 1
+
+prepare_ridership = lp.Task(
+    "PrepareRidership",
+    cache=cache,
+    # Set the optional expected ouput(s) for validation
+    outputs=[raw_ridership],
+)
+
+
+@prepare_ridership.process
+def extract(task):
+    return pd.DataFrame(
+        {
+            "month": ["2025-01", "2025-01", "2025-02"],
+            "boardings": [1200, 950, 1300],
+        }
+    )
+
+
+@prepare_ridership.process
+def transform(task, df):
+    return (
+        df.groupby("month", as_index=False)
+          .agg({"boardings": "sum"})
+    )
+
+
+@prepare_ridership.process
+def export(task, df):
+    # Non-blocking print statement
+    task.logger.print("Prepared raw ridership table")
+    return df
+
+
+@prepare_ridership.main
+def main(task):
+    # Execute the subprocesses
+    raw = task.extract()
+    transformed = task.transform(raw)
+    exported = task.export(transformed)
+
+    # Return the fulfilled expected ouput
+    return raw_ridership.fulfill(exported)
+
+
+# ============================================================
+# Task 2
+
+build_report = lp.Task(
+    "BuildRidershipReport",
+    cache=cache,
+    # Defines that this Task requires Data as processed by some other Task
+    dependencies=[raw_ridership],
+    # Set the optional expected ouput(s) for validation
+    outputs=[monthly_ridership],
+)
+
+
+@build_report.process
+def extract(task):
+    return task.dependencies["RawRidership"].data
+
+
+@build_report.process
+def transform(task, df):
+    df = df.copy()
+
+    df["change_pct"] = (
+        df["boardings"]
+        .pct_change()
+        .fillna(0)
+        * 100
+    )
+    # Display the status spinner during long processes
+    import time
+    time.sleep(2)
+
+    return df
+
+
+@build_report.process
+def export(task, df):
+    # Print log message
+    task.logger.warn("Exported monthly ridership report")
+    return df
+
+
+@build_report.main
+def main(task):
+    # Execute the subprocesses
+    source = task.extract()
+    transformed = task.transform(source)
+    report = task.export(transformed)
+
+    # Return the fulfilled expected ouput
+    return monthly_ridership.fulfill(report)
+
+
+# ============================================================
+# Pipeline
+
+pipeline = lp.Pipeline(
+    "RidershipReporting",
+    cache=cache,
+)
+
+pipeline.add(
+    prepare_ridership,
+    build_report,
+)
+
+pipeline.execute()
+
+
+# ============================================================
+# Proof
+
+df: pd.DataFrame = cache.get("MonthlyRidership").data
+print(df)
+
+```
+
+
+
+
+A typical workflow might combine:
+
+- Python data processing
+- SQL transformations
+- GIS analysis
+- File operations
+- API requests
+- Reporting workflows
+
+into a single, reproducible pipeline.
+
+
+

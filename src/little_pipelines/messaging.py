@@ -48,6 +48,7 @@ from typing import Literal
 from rich.console import Console
 from rich.highlighter import NullHighlighter
 from rich.logging import RichHandler
+from rich.style import Style
 
 # ============================================================================
 # Options / Config
@@ -296,8 +297,6 @@ class LPLogger:
             self.set_verbosity("normal")
         return
 
-
-
     # ========================================================================
     # Setup
 
@@ -413,6 +412,54 @@ class LPLogger:
         with self.console.status(status_msg):
             yield
 
+    def rule(self, color="yellow"):
+        """
+        Properly print a rich.console.rule.
+        """
+        self.stop()
+        self.console.rule(style=Style(color=color))
+        return
+
+    def print(
+        self,
+        msg: str,
+        as_log=True,
+        level_color="purple",
+        message_color="bright_white",
+        **kwargs
+    ) -> None:
+        """
+        Non-blocking user-facing print function; prefer to vanilla print inside tasks.
+
+        Args:
+            msg (str): The message to print.
+            as_log (bool): Use True (default) to print like a log message; False for normal print
+            level_color (str): The color of the level text. Default 'purple'.
+            message_color (str): The color of the printed message. Default 'bright_white'.
+        """
+        if not as_log:
+            self.stop()
+            self.console.print(msg, **kwargs)
+        else:
+            if not level_color or not message_color:
+                raise ValueError("level or message color cannot be empty strings")
+
+            user_info = MessageTheme(
+                level="USER",
+                task_style="bright_black",
+                level_style=level_color,
+                message_style=message_color,
+            )
+
+            self._emit(
+                logging.INFO,
+                msg,
+                "...",
+                user_info,
+            )
+
+        return
+
     # ========================================================================
     # Task Helpers
 
@@ -424,10 +471,10 @@ class LPLogger:
             TASK_START,
         )
 
-    def task_complete(self, task: str, elapsed: str, ):
+    def task_complete(self, task: str, elapsed: str = ""):
         self._emit(
             logging.INFO,
-            f"(completed in {elapsed})" if elapsed else "complete",
+            f"Completed (in {elapsed})" if elapsed else "Completed",
             task,
             TASK_COMPLETE,
         )
@@ -443,7 +490,7 @@ class LPLogger:
     def process_complete(self, task: str, process: str, elapsed: str | None = None, ):
         self._emit(
             logging.INFO,
-            f"{process} (completed in {elapsed})" if elapsed else f"{process} complete",
+            f"{process} Completed (in {elapsed})" if elapsed else f"{process} Completed",
             task,
             PROCESS_COMPLETE,
         )

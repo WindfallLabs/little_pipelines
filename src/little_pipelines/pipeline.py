@@ -385,12 +385,17 @@ class Pipeline:
         self.current_run.tasks_total = len([t for t in tasks if not t.manual_execution_only])
         manual_tasks = len([t for t in tasks if t.manual_execution_only])
 
-        self.logger.info(task="Pipeline", msg="Executing Tasks...")
         # Set the logger's max task name spacing
         self.logger.set_max_task_name_len(max([len(t.name) for t in tasks]) + 4)
 
+        # Print
+        self.logger.info(
+            task="Pipeline",
+            msg=f"Executing {len(tasks)} Task(s)..."
+        )
+
         for task in tasks:
-            self.logger.task_start(task.name)
+            #self.logger.task_start(task.name)
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
                 #task.is_skipped = True  # TODO: this makes sense right?
@@ -430,7 +435,7 @@ class Pipeline:
 
         self.current_run.tasks_skipped = len([t for t in tasks if t.is_skipped is True])
 
-        self.logger.console.rule()
+        self.logger.rule("green")
         _timer.stop()
         self.logger.pipeline_complete(
             f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} "
@@ -449,12 +454,14 @@ class Pipeline:
             self.logger.error(
                 msg=f"Failed: {self.current_run.tasks_failed}/{self.current_run.tasks_total} tasks"
             )
-        self.logger.console.rule()
+        self.logger.stop()
 
         # Cache the PipelineRun
         self.current_run.stop()
         if self.cache is not None:
             self.cache.put_run(self.current_run)
+
+        self.logger.rule()
 
         return
 
