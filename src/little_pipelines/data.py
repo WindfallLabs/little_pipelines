@@ -44,8 +44,8 @@ Example
 from collections.abc import Callable
 from typing import Any
 
-from .caching.result import Result
-from .policies import Policy, Status
+from .caching import Cache, Result
+from .policies import Policy, Status  # TODO: review
 
 
 class Data:
@@ -153,6 +153,15 @@ class Data:
 
         if validate:
             value = self.validate(value)
+
+        return value
+
+    def get_from_cache(self, cache: Cache) -> Any:  # TODO: test
+        """
+        Gets the cached Result with the same name as this Data.
+        """
+        r: Result = cache.get(self.name)
+        value = self.validate(r.data)
 
         return value
 

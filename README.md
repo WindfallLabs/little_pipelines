@@ -134,7 +134,7 @@ ___NOTE: this is currently executing PrepareRidership twice___
 
 import little_pipelines as lp
 
-cache = lp.Cache()
+cache = lp.Cache()  # You'd want to provide a path
 
 
 # ============================================================
@@ -161,7 +161,8 @@ monthly_ridership = lp.Data(
 
 @monthly_ridership.getter
 def get(self):
-    # This is a lazy way but works
+    # This is covered by `monthly_ridership.get_from_cache(cache)`
+    # but works as an example
     return cache.get("MonthlyRidership").data
 
 
@@ -179,7 +180,7 @@ import little_pipelines as lp
 prepare_ridership = lp.Task(
     "PrepareRidership",
     cache=cache,
-    # Set the optional expected ouput(s) for validation
+    # Set the optional expected output(s) for validation
     outputs=[raw_ridership],
 )
 
@@ -226,15 +227,16 @@ def main(task):
 import little_pipelines as lp
 
 #from my_cache import cache
+#from my_data import monthly_ridership
 
 
 build_report = lp.Task(
     "BuildRidershipReport",
     cache=cache,
     # Defines that this Task requires Data as processed by some other Task
-    dependencies=[raw_ridership],
+    dependencies=[raw_ridership],  # Can be lp.Data or str (name)
     # Set the optional expected ouput(s) for validation
-    outputs=[monthly_ridership],
+    outputs=[monthly_ridership],  # Must be lp.Data objects
 )
 
 

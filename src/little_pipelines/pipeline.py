@@ -85,17 +85,20 @@ class Pipeline:
         """
         Generates the execution order of tasks based on dependencies.
         """
-        if not self._task_deps:
-            for task in self._tasks:
-                self._task_deps[task.name] = []
-                for dep_name in task.dependency_names:
-                    # Find Task-dependencies
-                    #dep_task = self.get_task(dep_name)
-                    self._task_deps[task.name].append(dep_name)
+        #if not self._task_deps:
+        for task in self._tasks:
+            self._task_deps[task.name] = []
+            for dep_name in task.dependency_names:
+                # Find Task-dependencies
+                #dep_task = self.get_task(dep_name)
+                self._task_deps[task.name].append(dep_name)
 
+        _done = set()  # Assure that only unique tasks are yielded
         for task_name in self.topologically_sorted:
             task: Task = self.get_task(task_name)
-            yield task
+            if task not in _done:
+                yield task
+            _done.add(task)
 
     def get_upstream_tasks(self, task_name: str) -> list[str]:
         """

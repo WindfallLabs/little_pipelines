@@ -57,7 +57,7 @@ class Task:
         name: str,
         cache: Cache | None = None,
         dependencies: list[str | Data] | None = None,
-        outputs: dict[str, type] | None = None,
+        outputs: list[Data] | None = None,
         manual_execution_only: bool = False,
         # WIP arguments
         if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
@@ -68,28 +68,19 @@ class Task:
         Initialize a Task.
 
         Args:
-            name: Unique task name (e.g. MyTask)
-            dependencies: Data required for this Task to perform work.
-            input_files: List of input file paths/patterns for hash tracking
-            hash_inputs: If False, use empty string hash (for API/DB inputs)
-            cache: Uses Pipeline's cache, default cache, or user-provided cache
-            cache_results: Allow the task to save its results to the cache
-            outputs: A validation contract that describes what the Task promises to return.
+            name (str): Unique task name (e.g. MyTask).
+            cache (Cache): A Cache object to store outputs.
+            dependencies (list[str|Data]): Names of Results (as produced by other Tasks) required by this Task.
+            outputs (list[Data]): Data objects expected to be fulfilled.
+            manual_execution_only (bool): Tells Pipelines not to run this task (default False).
+            ...
         """
         self._name: str = name
 
-        # Dependencies
-        dep_names = set()
-        if dependencies:
-            for dep in dependencies:
-                if isinstance(dep, Data):
-                    dep_names.add(dep.dependency_name())
-                else:
-                    dep_names.add(str(dep))
-        self._dependency_names = frozenset(dep_names)
-        self._dependencies: dict[str, Any] | None = None
+        # User-provided dependency names (technically Result names)
+        self._input_dependencies: list[str | Data] = dependencies or []
 
-        self._output_specs = self._normalize_outputs(outputs)
+        self._output_specs = self._normalize_outputs(outputs)  # TODO: remove?
 
         self.if_upstream_errors = if_upstream_errors
 
@@ -132,7 +123,7 @@ class Task:
     @property
     def outputs(self) -> dict[str, type]:
         """
-        Public view of Task outputs.
+        Task outputs.
 
         Returns the legacy mapping:
             output_name -> dtype
@@ -176,41 +167,41 @@ class Task:
     def is_skipped(self, value: bool):
         """
         """
-        # try:
-        #     #self.logger.warn(self.name, f"Skipped {value}")
-        #     # TODO: not sure what callback is useful here
-        # except AttributeError:
-        #     pass
         self._skipped = value
+
+        if value is True:
+            self.logger.warn(self.name, f"Skipped {value}")  # TODO: test
+            # TODO: not sure what other callbacks are useful here
+        
+        return
 
     @property
     def has_main(self):
         return self._main_func is not None
 
     @property
-    def dependency_names(self):
+    def dependency_names(self) -> set[str]:
         """
+        Names of Results that this Task depends on (were created by upstram Tasks).
         """
-        return self._dependency_names
+        # Where i is either a str or Data
+        return {i.name if isinstance(i, Data) else i for i in self._input_dependencies}
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
         """
-        Results of upstream Tasks that this Task depends on.
+        Results created by upstream Tasks that are accessible to this Task.
         """
-        # Create _dependencies if it is None
-        if not self._dependencies:
-            deps: dict[str, Any] = {}
-            for d in self._dependency_names:
-                try:
-                    dep: Result = self.cache.get(d)
-                    deps[d] = dep
-                except exc.ResultNotFoundError as e:
-                    raise exc.DependencyNotFoundError(f"'{d}' not in cache") from e
+        deps: dict[str, Result] = {}
+        for dep_name in self.dependency_names:
+            # Get Task by Result name
+            try:
+                dep: Result = self.cache.get(dep_name)
+                deps[dep_name] = dep
+            except exc.ResultNotFoundError as e:
+                raise exc.DependencyNotFoundError(f"'{dep_name}' not in cache") from e
 
-            self._dependencies = DependencyDict(deps)
-
-        return self._dependencies
+        return DependencyDict(deps)
 
     @property
     def pipeline(self):
@@ -224,7 +215,7 @@ class Task:
         self._pipeline = pipeline
         return
 
-    def _normalize_outputs(
+    def _normalize_outputs(  # TODO: remove?
         self,
         outputs: dict[str, type] | list[Data] | None,
     ) -> dict[str, dict[str, Any]]:
@@ -636,7 +627,7 @@ class Task:
     # Dunders
 
     def __repr__(self):
-        return f"<Task ('{self._name}')>"
+        return f"<Task ('{self.name}')>"
 
 
 __all__ = ["find_tasks", "Task"]
