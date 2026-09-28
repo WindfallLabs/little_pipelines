@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from little_pipelines import Data, Task
+from little_pipelines import DataSpec, Task
 from little_pipelines.exc import (
     MissingOutputError,
     TaskOutputValidationError,
@@ -41,7 +41,7 @@ def test_outputs_none_creates_no_contract():
 
 
 def test_data_output_contract_exposes_dtype():
-    data = Data(
+    data = DataSpec(
         name="Output",
         dtype=int,
     )
@@ -110,7 +110,7 @@ def test_correct_output_type_passes(cache):
 
     @task.main
     def main(t):
-        return Data("value").fulfill(123)
+        return DataSpec("value").fulfill(123)
 
     assert task.main() == 123
 
@@ -128,8 +128,8 @@ def test_multiple_outputs_pass_validation(cache):
     @task.main
     def main(t):
         return (
-            Data("a").fulfill(123),
-            Data("b").fulfill("abc"),
+            DataSpec("a").fulfill(123),
+            DataSpec("b").fulfill("abc"),
         )
 
     assert task.main() == (123, "abc")
@@ -146,7 +146,7 @@ def test_wrong_output_type_raises(cache):
 
     @task.main
     def main(t):
-        return Data("value").fulfill("abc")
+        return DataSpec("value").fulfill("abc")
 
     with pytest.raises(ExceptionGroup) as exc_info:
         task.main()
@@ -167,7 +167,7 @@ def test_missing_output_raises(cache):
 
     @task.main
     def main(t):
-        return Data("other").fulfill(123)
+        return DataSpec("other").fulfill(123)
 
     with pytest.raises(ExceptionGroup) as exc_info:
         task.main()
@@ -211,8 +211,8 @@ def test_unexpected_output_raises(cache):
     @task.main
     def main(t):
         return (
-            Data("expected").fulfill(123),
-            Data("extra").fulfill(456),
+            DataSpec("expected").fulfill(123),
+            DataSpec("extra").fulfill(456),
         )
 
     with pytest.raises(ExceptionGroup) as exc_info:
@@ -232,7 +232,7 @@ def test_any_output_type_accepts_any_value(cache):
 
     @task.main
     def main(t):
-        return Data("value").fulfill({"anything": ["goes", 123]})
+        return DataSpec("value").fulfill({"anything": ["goes", 123]})
 
     result = task.main()
 
@@ -240,7 +240,7 @@ def test_any_output_type_accepts_any_value(cache):
 
 
 def test_data_validation_errors_are_wrapped(cache):
-    data = Data(
+    data = DataSpec(
         name="Validated",
         dtype=int,
     )
@@ -289,8 +289,8 @@ def test_multiple_validation_errors_are_grouped(cache):
     @task.main
     def main(t):
         return (
-            Data("a").fulfill("wrong type"),
-            Data("unexpected").fulfill(123),
+            DataSpec("a").fulfill("wrong type"),
+            DataSpec("unexpected").fulfill(123),
         )
 
     with pytest.raises(ExceptionGroup) as exc_info:

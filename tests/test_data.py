@@ -1,12 +1,12 @@
 """
-Test Data
+Test DataSpec
 """
 
 from unittest.mock import Mock
 
 import pytest
 
-from little_pipelines.data import Data
+from little_pipelines.data import DataSpec
 from little_pipelines.caching.result import Result
 
 
@@ -18,14 +18,14 @@ from little_pipelines.caching.result import Result
 @pytest.fixture(autouse=True)
 def data_registry():
     """
-    Data uses a global class-level registry.
+    DataSpec uses a global class-level registry.
 
     Clear it before and after every test to prevent
     order-dependent failures.
     """
-    Data._registry.clear()
+    DataSpec._registry.clear()
     yield
-    Data._registry.clear()
+    DataSpec._registry.clear()
 
 
 # ============================================================================
@@ -34,7 +34,7 @@ def data_registry():
 
 
 def test_init_stores_attributes():
-    data = Data(
+    data = DataSpec(
         "Parcels",
         dtype=dict,
         doc="Parcel dataset",
@@ -52,19 +52,19 @@ def test_init_stores_attributes():
 
 
 def test_init_defaults_tags_to_empty_list():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     assert data.tags == []
 
 
 def test_init_registers_instance():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
-    assert Data.lookup("Parcels") is data
+    assert DataSpec.lookup("Parcels") is data
 
 
 def test_extra_kwargs_available_via_getattr():
-    data = Data(
+    data = DataSpec(
         "Parcels",
         schema="public",
         refresh="daily",
@@ -80,7 +80,7 @@ def test_extra_kwargs_available_via_getattr():
 
 
 def test_getter_decorator_registers_function():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.getter
     def get(dataset):
@@ -90,7 +90,7 @@ def test_getter_decorator_registers_function():
 
 
 def test_get_calls_registered_getter():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.getter
     def get(dataset):
@@ -100,7 +100,7 @@ def test_get_calls_registered_getter():
 
 
 def test_get_passes_args_and_kwargs():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     received = {}
 
@@ -119,7 +119,7 @@ def test_get_passes_args_and_kwargs():
 
 
 def test_get_without_getter_raises_attribute_error():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     with pytest.raises(AttributeError):
         data.get()
@@ -131,7 +131,7 @@ def test_get_without_getter_raises_attribute_error():
 
 
 def test_validator_decorator_registers_function():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.validator
     def validate(dataset, value):
@@ -141,7 +141,7 @@ def test_validator_decorator_registers_function():
 
 
 def test_validate_without_validator_returns_original_value():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     obj = object()
 
@@ -149,7 +149,7 @@ def test_validate_without_validator_returns_original_value():
 
 
 def test_validate_uses_registered_validator():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.validator
     def validate(dataset, value):
@@ -159,7 +159,7 @@ def test_validate_uses_registered_validator():
 
 
 def test_get_validate_true_invokes_validator():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.getter
     def get(dataset):
@@ -173,7 +173,7 @@ def test_get_validate_true_invokes_validator():
 
 
 def test_get_validate_false_skips_validator():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     @data.getter
     def get(dataset):
@@ -194,7 +194,7 @@ def test_get_validate_false_skips_validator():
 
 
 def test_fulfill_returns_result():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     result = data.fulfill({"rows": 10})
 
@@ -202,7 +202,7 @@ def test_fulfill_returns_result():
 
 
 def test_fulfill_uses_data_name_by_default():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     result = data.fulfill("value")
 
@@ -211,7 +211,7 @@ def test_fulfill_uses_data_name_by_default():
 
 
 def test_fulfill_accepts_custom_name():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     result = data.fulfill(
         "value",
@@ -222,7 +222,7 @@ def test_fulfill_accepts_custom_name():
 
 
 def test_fulfill_passes_extra_metadata():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     result = data.fulfill(
         "value",
@@ -238,23 +238,23 @@ def test_fulfill_passes_extra_metadata():
 
 
 def test_lookup_returns_registered_object():
-    original = Data("Parcels")
+    original = DataSpec("Parcels")
 
-    found = Data.lookup("Parcels")
+    found = DataSpec.lookup("Parcels")
 
     assert found is original
 
 
 def test_lookup_missing_name_raises_keyerror():
     with pytest.raises(KeyError):
-        Data.lookup("DoesNotExist")
+        DataSpec.lookup("DoesNotExist")
 
 
 def test_all_returns_all_registered_objects():
-    one = Data("One")
-    two = Data("Two")
+    one = DataSpec("One")
+    two = DataSpec("Two")
 
-    result = Data.all()
+    result = DataSpec.all()
 
     assert len(result) == 2
     assert one in result
@@ -262,12 +262,12 @@ def test_all_returns_all_registered_objects():
 
 
 def test_all_empty_registry():
-    assert Data.all() == []
+    assert DataSpec.all() == []
 
 
 def test_find_locals_returns_only_data_objects():
-    one = Data("One")
-    two = Data("Two")
+    one = DataSpec("One")
+    two = DataSpec("Two")
 
     namespace = {
         "one": one,
@@ -277,7 +277,7 @@ def test_find_locals_returns_only_data_objects():
         "object": object(),
     }
 
-    result = Data.find_locals(namespace)
+    result = DataSpec.find_locals(namespace)
 
     assert set(result) == {"one", "two"}
 
@@ -288,7 +288,7 @@ def test_find_locals_returns_only_data_objects():
 
 
 def test_status_without_policy_returns_unknown_status():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     result = data.status()
 
@@ -301,7 +301,7 @@ def test_status_delegates_to_policy():
     policy = Mock()
     policy.check.return_value = expected
 
-    data = Data(
+    data = DataSpec(
         "Parcels",
         policy=policy,
     )
@@ -318,28 +318,28 @@ def test_status_delegates_to_policy():
 
 
 def test_dependency_name_returns_name():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     assert data.dependency_name() == "Parcels"
 
 
 def test_unknown_attribute_raises_attribute_error():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
     with pytest.raises(AttributeError):
         data.not_real
 
 
 def test_repr_with_dtype():
-    data = Data(
+    data = DataSpec(
         "Parcels",
         dtype=dict,
     )
 
-    assert repr(data) == "<Data 'Parcels' (dict)>"
+    assert repr(data) == "<DataSpec 'Parcels' (dict)>"
 
 
 def test_repr_without_dtype():
-    data = Data("Parcels")
+    data = DataSpec("Parcels")
 
-    assert repr(data) == "<Data 'Parcels' (Any)>"
+    assert repr(data) == "<DataSpec 'Parcels' (Any)>"

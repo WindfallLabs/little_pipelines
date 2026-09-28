@@ -2,8 +2,6 @@
 Execution commands for the Little Pipelines shell.
 """
 
-from __future__ import annotations
-
 from ..parsers import parse_execute_args
 
 

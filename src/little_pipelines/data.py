@@ -1,7 +1,7 @@
 """
-Data - Define and document data.
+DataSpec - Define and document data.
 
-A Data object represents a conceptual dataset and definition.
+A DataSpec object represents a conceptual dataset and definition.
 It's optional, but highly recommended for documentation.
 It's a feature for the advanced beta-testers.
 
@@ -12,7 +12,7 @@ Examples:
     Routes
     Ridership
 
-Data objects provide:
+DataSpec objects provide:
 
     - Documentation
     - Discovery
@@ -21,7 +21,7 @@ Data objects provide:
     - Result creation via fulfill()
 
 
-Use Data.fulfill() to create Result objects.
+Use DataSpec.fulfill() to create Result objects.
 
 Example
 -------
@@ -48,23 +48,23 @@ from .caching import Cache, Result
 from .policies import Policy, Status  # TODO: review
 
 
-class Data:
+class DataSpec:
     """
     Defines a dataset.
 
-    A Data object describes a dataset and provides
+    A DataSpec object describes a dataset and provides
     a standard interface for retrieving or validating it.
 
     It may also create Result objects through fulfill().
 
     Notes
     -----
-    Data objects should remain relatively stable after
+    DataSpec objects should remain relatively stable after
     registration. They represent the identity and purpose
     of a dataset rather than a specific runtime value.
     """
 
-    _registry: dict[str, "Data"] = {}
+    _registry: dict[str, "DataSpec"] = {}
 
     def __init__(
         self,
@@ -94,7 +94,7 @@ class Data:
         # Freshness / invalidation / expiry policy
         self.policy = policy
         
-        Data._registry[name] = self
+        DataSpec._registry[name] = self
 
     # ============================================================
     # Registration
@@ -158,7 +158,7 @@ class Data:
 
     def get_from_cache(self, cache: Cache) -> Any:  # TODO: test
         """
-        Gets the cached Result with the same name as this Data.
+        Gets the cached Result with the same name as this DataSpec.
         """
         r: Result = cache.get(self.name)
         value = self.validate(r.data)
@@ -204,7 +204,7 @@ class Data:
         This method:
 
         - Does NOT cache anything.
-        - Does NOT mutate the Data object.
+        - Does NOT mutate the DataSpec object.
         - Does NOT validate automatically.
 
         It simply creates a Result and clarifies
@@ -231,16 +231,16 @@ class Data:
     # Discovery
 
     @classmethod
-    def lookup(cls, name: str) -> "Data":
+    def lookup(cls, name: str) -> "DataSpec":
         """
-        Retrieve a registered Data definition.
+        Retrieve a registered DataSpec definition.
         """
         return cls._registry[name]
 
     @classmethod
-    def all(cls) -> list["Data"]:
+    def all(cls) -> list["DataSpec"]:
         """
-        Return all registered Data definitions.
+        Return all registered DataSpec definitions.
         """
         return list(cls._registry.values())
 
@@ -252,7 +252,7 @@ class Data:
         Example
         -------
 
-            __all__ = Data.find_locals(locals())
+            __all__ = DataSpec.find_locals(locals())
         """
         return [
             name
@@ -291,6 +291,6 @@ class Data:
         )
 
         return (
-            f"<Data '{self.name}' "
+            f"<DataSpec '{self.name}' "
             f"({dtype})>"
         )

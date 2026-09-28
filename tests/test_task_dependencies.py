@@ -10,7 +10,7 @@ Fous:
 
 import pytest
 
-from little_pipelines import Data, Task
+from little_pipelines import DataSpec, Task
 from little_pipelines import exc
 
 
@@ -66,7 +66,7 @@ def test_string_dependencies_are_normalized():
 
 
 def test_data_dependencies_are_normalized():
-    upstream = Data(
+    upstream = DataSpec(
         "Parcels",
     )
 

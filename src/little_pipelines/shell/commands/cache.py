@@ -2,8 +2,6 @@
 Cache commands for the Little Pipelines shell.
 """
 
-from __future__ import annotations
-
 
 class CacheCommands:
     """

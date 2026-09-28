@@ -16,41 +16,32 @@ It should only answer:
     "What did the user type?"
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
+
 # ============================================================================
 # Execution
-# ============================================================================
+
 
 @dataclass(slots=True)
 class ExecuteArgs:
     """
     Parsed arguments for the execute command.
     """
-
     target: str
-
     force: bool = False
-
     upstream: bool = True
-
     downstream: bool = True
-
     quiet: bool = False
-
     verbose: bool = False
-
     skip_tasks: list[str] | None = None
-
     kwargs: dict[str, Any] | None = None
 
 
 # ============================================================================
 # Low-level helpers
-# ============================================================================
+
 
 
 # def _get_skipped(inputs: list[str]) -> list[str]:

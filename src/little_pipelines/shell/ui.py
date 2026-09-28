@@ -9,8 +9,6 @@ It should not:
     - Access private Pipeline APIs
 """
 
-from __future__ import annotations
-
 from rich.markdown import Markdown
 
 # ============================================================================

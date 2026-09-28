@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 from . import exc, util
 from .caching import Cache, Result
-from .data import Data
+from .data import DataSpec
 from .messaging import get_logger
 
 if TYPE_CHECKING:
@@ -56,8 +56,8 @@ class Task:
         self: Self,
         name: str,
         cache: Cache | None = None,
-        dependencies: list[str | Data] | None = None,
-        outputs: list[Data] | None = None,
+        dependencies: list[str | DataSpec] | None = None,
+        outputs: list[DataSpec] | None = None,
         manual_execution_only: bool = False,
         # WIP arguments
         if_upstream_errors: Literal["FAIL", "SKIP"] = "FAIL",
@@ -70,15 +70,15 @@ class Task:
         Args:
             name (str): Unique task name (e.g. MyTask).
             cache (Cache): A Cache object to store outputs.
-            dependencies (list[str|Data]): Names of Results (as produced by other Tasks) required by this Task.
-            outputs (list[Data]): Data objects expected to be fulfilled.
+            dependencies (list[str|DataSpec]): Names of Results (as produced by other Tasks) required by this Task.
+            outputs (list[DataSpec]): DataSpec objects expected to be fulfilled.
             manual_execution_only (bool): Tells Pipelines not to run this task (default False).
             ...
         """
         self._name: str = name
 
         # User-provided dependency names (technically Result names)
-        self._input_dependencies: list[str | Data] = dependencies or []
+        self._input_dependencies: list[str | DataSpec] = dependencies or []
 
         self._output_specs = self._normalize_outputs(outputs)  # TODO: remove?
 
@@ -184,8 +184,8 @@ class Task:
         """
         Names of Results that this Task depends on (were created by upstram Tasks).
         """
-        # Where i is either a str or Data
-        return {i.name if isinstance(i, Data) else i for i in self._input_dependencies}
+        # Where i is either a str or DataSpec
+        return {i.name if isinstance(i, DataSpec) else i for i in self._input_dependencies}
 
     @property
     def dependencies(self) -> dict[str, Result] | None:
@@ -217,7 +217,7 @@ class Task:
 
     def _normalize_outputs(  # TODO: remove?
         self,
-        outputs: dict[str, type] | list[Data] | None,
+        outputs: dict[str, type] | list[DataSpec] | None,
     ) -> dict[str, dict[str, Any]]:
         """
         Normalize Task output declarations into a common structure.
@@ -247,15 +247,15 @@ class Task:
             return {}
 
         # ---------------------------------------------------------
-        # Data objects
+        # DataSpec objects
 
         if isinstance(outputs, list):
             specs: dict[str, dict[str, Any]] = {}
             for data in outputs:
-                if not isinstance(data, Data):
+                if not isinstance(data, DataSpec):
                     raise TypeError(
                         "Task outputs lists must contain only "
-                        "Data objects."
+                        "DataSpec objects."
                     )
 
                 specs[data.name] = {
@@ -294,7 +294,7 @@ class Task:
             "outputs must be one of:\n"
             "    None\n"
             "    dict[str, type]\n"
-            "    list[Data]"
+            "    list[DataSpec]"
         )
 
     def _validate_outputs(self, results: tuple[Result]) -> None:
@@ -340,7 +340,7 @@ class Task:
             )
 
         # ============================================================
-        # Type validation + Data validation
+        # Type validation + DataSpec validation
 
         for output_name in (expected_names & actual_names):
             result = actual[output_name]
@@ -377,11 +377,11 @@ class Task:
                 continue
 
             # --------------------------------------------------------
-            # Data validation
+            # DataSpec validation
 
             if data_obj is not None:
                 try:
-                    # Uses Data.validate(...)
+                    # Uses DataSpec.validate(...)
                     data_obj.validate(result.data)
                 except Exception as e:
                     errors.append(
@@ -401,7 +401,7 @@ class Task:
 
         return
 
-    # TODO: remove and replace instances with Data.fulfill(value)
+    # TODO: remove and replace instances with DataSpec.fulfill(value)
     def result(self, data: Any, name: str | None = None) -> Result:
         """
         Creates a Result object.

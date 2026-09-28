@@ -216,7 +216,7 @@ def test_datasets_lists_all(shell):
     dataset.name = "Parcels"
     dataset.dtype = str
 
-    with patch("little_pipelines.shell.commands.inspection.Data.all") as mock_all:
+    with patch("little_pipelines.shell.commands.inspection.DataSpec.all") as mock_all:
         mock_all.return_value = [dataset]
 
         shell.do_datasets()
@@ -232,7 +232,7 @@ def test_datasets_sorts(shell, dataset_factory):
     dataset_a = dataset_factory(name="a_dataset", dtype=str)
     dataset_b = dataset_factory(name="b_dataset", dtype=str)
 
-    with patch("little_pipelines.shell.commands.inspection.Data.all") as mock_all:
+    with patch("little_pipelines.shell.commands.inspection.DataSpec.all") as mock_all:
         mock_all.return_value = [
             dataset_a,
             dataset_b,
@@ -258,7 +258,7 @@ def test_dataset_displays_metadata(shell, dataset_factory):
         name="Parcels", owner="GIS", source="County", tags=["core"], doc=None
     )
 
-    with patch("little_pipelines.shell.commands.inspection.Data.lookup") as mock_lookup:
+    with patch("little_pipelines.shell.commands.inspection.DataSpec.lookup") as mock_lookup:
         mock_lookup.return_value = dataset
 
         shell.do_dataset("Parcels")
@@ -280,7 +280,7 @@ def test_status_prints_dataset_states(shell, dataset_factory):
 
     dataset.status.return_value = status
 
-    with patch("little_pipelines.shell.commands.inspection.Data.all") as mock_all:
+    with patch("little_pipelines.shell.commands.inspection.DataSpec.all") as mock_all:
         mock_all.return_value = [dataset]
 
         shell.do_status()

@@ -11,7 +11,7 @@ Focus:
 
 import pytest
 
-from little_pipelines import Data, Task
+from little_pipelines import DataSpec, Task
 from little_pipelines.exc import DuplicateResultsError
 
 
@@ -63,7 +63,7 @@ def test_process_wrapper(cache):
     @task.main
     def main(t: Task):
         value = t.thing(1)
-        return Data("Process").fulfill(value)
+        return DataSpec("Process").fulfill(value)
 
     assert task.main() == 123
 
@@ -94,7 +94,7 @@ def test_single_result_return_is_unpacked(cache):
 
     @task.main
     def main(t):
-        return Data(t.name).fulfill(456)
+        return DataSpec(t.name).fulfill(456)
 
     assert task.main() == 456
 
@@ -108,8 +108,8 @@ def test_multi_result_return_is_tuple(cache):
     @task.main
     def main(t):
         return (
-            Data("One").fulfill(1),
-            Data("Two").fulfill(2),
+            DataSpec("One").fulfill(1),
+            DataSpec("Two").fulfill(2),
         )
 
     assert task.main() == (1, 2)
@@ -124,7 +124,7 @@ def test_sequence_must_contain_only_results(cache):
     @task.main
     def main(t):
         return (
-            Data("One").fulfill(1),
+            DataSpec("One").fulfill(1),
             2,
         )
 
@@ -154,8 +154,8 @@ def test_duplicate_result_name_raises(cache):
     @task.main
     def main(t):
         return (
-            Data("Same").fulfill(1),
-            Data("Same").fulfill(2),
+            DataSpec("Same").fulfill(1),
+            DataSpec("Same").fulfill(2),
         )
 
     with pytest.raises(

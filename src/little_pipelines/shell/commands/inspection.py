@@ -2,11 +2,9 @@
 Inspection commands for the Little Pipelines shell.
 """
 
-from __future__ import annotations
-
 from rich.markdown import Markdown
 
-from little_pipelines.data import Data
+from little_pipelines.data import DataSpec
 
 from ..ui import (
     render_dependency_list,
@@ -212,14 +210,14 @@ class InspectionCommands:
         return
 
     # ======================================================================
-    # Data inspection
+    # DataSpec inspection
 
     def do_datasets(self, inp: str = "") -> None:
         """
         List registered datasets.
         """
 
-        datasets = Data.all()
+        datasets = DataSpec.all()
 
         if "--sort" in inp:
 
@@ -254,7 +252,7 @@ class InspectionCommands:
             self.logger.shell_fail("Dataset name required.")
             return
 
-        dataset = Data.lookup(
+        dataset = DataSpec.lookup(
             dataset_name
         )
 
@@ -285,7 +283,7 @@ class InspectionCommands:
         Show dataset status.
         """
 
-        for dataset in Data.all():
+        for dataset in DataSpec.all():
             status = dataset.status()
             self.console.print(f"{dataset.name:<30}{status.state}")
 

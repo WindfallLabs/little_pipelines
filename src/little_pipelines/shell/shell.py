@@ -24,8 +24,6 @@ Shell subclasses should add analyst-specific commands by defining
 additional do_* methods.
 """
 
-from __future__ import annotations
-
 import re
 from cmd import Cmd
 
