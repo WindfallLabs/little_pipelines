@@ -83,14 +83,17 @@ def test_bigtest():
 
     assert pipeline.dependency_graph == {"One": [], "Two": ["One"], "Three": ["Two"]}
     assert list(pipeline.topologically_sorted) == ["One", "Two", "Three"]
-    assert pipeline.get_upstream_tasks("Three") == ["One", "Two"]
-    assert pipeline.get_downstream_tasks("One") == ["Two", "Three"]
+    assert pipeline.get_upstream("Three") == ["One", "Two"]
+    assert pipeline.get_downstream("One") == ["Two", "Three"]
 
     pipeline.execute()
 
     assert task_one.is_executed is True
-    assert task_two.is_executed is True
+    assert "A" in cache.keys()
+    assert task_two.is_executed is True  # Broken here
+    assert "B" in cache.keys()
     assert task_three.is_executed is True
+    assert "C" in cache.keys()
 
     assert output_a.get_from_cache(cache) == "Result for A"
     assert output_b.get_from_cache(cache) == 12

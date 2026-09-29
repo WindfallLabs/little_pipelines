@@ -14,10 +14,9 @@ import pytest
 from little_pipelines import DataSpec, Task
 from little_pipelines.exc import DuplicateResultsError
 
+
 # =============================================================================
 # Fixtures
-# =============================================================================
-
 
 @pytest.fixture
 def simple_task(cache):
@@ -35,8 +34,6 @@ def simple_task(cache):
 
 # =============================================================================
 # Basic state
-# =============================================================================
-
 
 def test_task_repr_contains_name(simple_task):
     assert "Simple" in repr(simple_task)
@@ -69,8 +66,6 @@ def test_process_wrapper(cache):
 
 # =============================================================================
 # Return value handling
-# =============================================================================
-
 
 def test_single_scalar_return_is_unpacked(cache):
     task = Task(
@@ -166,8 +161,6 @@ def test_duplicate_result_name_raises(cache):
 
 # =============================================================================
 # Error handling
-# =============================================================================
-
 
 def test_task_exception_is_raised_by_default(cache):
     task = Task(
@@ -221,8 +214,6 @@ def test_failed_task_is_not_executed(cache):
 
 # =============================================================================
 # Wrapper kwarg validation
-# =============================================================================
-
 
 def test_force_kwarg_must_be_bool(cache):
     task = Task(
@@ -234,28 +225,14 @@ def test_force_kwarg_must_be_bool(cache):
     def main(t):
         return 1
 
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError):
         task.main(force="yes")
-
-
-def test_raise_errors_kwarg_must_be_bool(cache):
-    task = Task(
-        "Example",
-        cache=cache,
-    )
-
-    @task.main
-    def main(t):
-        return 1
-
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError):
         task.main(raise_errors="no")
 
 
 # =============================================================================
 # Wrapper behavior
-# =============================================================================
-
 
 def test_user_kwargs_are_passed_to_main(cache):
     task = Task(

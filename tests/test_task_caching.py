@@ -24,22 +24,18 @@ def test_force_false_uses_cached_results(cache):
     )
 
     @task.main
-    def main(t):
+    def main(t) -> int:
         nonlocal call_count
         call_count += 1
         return call_count
 
-    first = task.main(force=True)
-    cached = task.main(force=False)
-
+    first: int = task.main(force=True)
     assert first == 1
 
-    # Task body should only run once.
+    cached: int = task.main(force=False)
+    assert cached == 1
+    assert first == 1
     assert call_count == 1
-
-    # Cached path returns Result objects.
-    assert len(cached) == 1
-    assert cached[0].value == 1
 
 
 def test_force_true_reruns_task(cache):

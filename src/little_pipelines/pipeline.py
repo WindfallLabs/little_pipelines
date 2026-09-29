@@ -4,7 +4,9 @@ Pipeline - The orchestration.
 
 import importlib
 import inspect
+from collections import defaultdict
 from collections.abc import Callable, Generator
+from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Any
 
@@ -76,6 +78,14 @@ class Pipeline:
             t.name: [self.get_task(i).name for i in t.dependency_names] for t in self._tasks
         }
 
+    @cached_property
+    def _reverse_graph(self) -> dict:
+        reverse = defaultdict(list)
+        for task, deps in self.dependency_graph.items():
+            for dep in deps:
+                reverse[dep].append(task)
+        return reverse
+
     @property
     def topologically_sorted(self) -> Generator[str]:
         """
@@ -93,7 +103,7 @@ class Pipeline:
         for task_name in self.topologically_sorted:
             yield self.get_task(task_name)
 
-    def get_upstream_tasks(self, task_name: str) -> list[str]:
+    def get_upstream(self, task_name: str) -> list[str]:
         """
         Return all upstream dependencies of 'task_name' in topological order.
         """
@@ -111,21 +121,24 @@ class Pipeline:
 
         return [t for t in order if t in visited]
 
-    def get_downstream_tasks(self, task_name: str) -> list[str]:
+    def get_downstream(self, task_name: str) -> list[str]:
         """
         Return all tasks downstream of `task_name` and upstream of those.
         """
-        target = task_name
-        downstream = []
-        reverse = {}
-        for k in self.dependency_graph:
-            for d in self.dependency_graph[k]:
-                reverse[d] = k
-        for k in reverse:
-            target = reverse.get(target)
-            if target is not None:
-                downstream.append(target)
-        return downstream
+        if task_name not in self.dependency_graph:
+            raise KeyError(f"Unknown task: {task_name}")
+
+        visited = set()
+        stack = [task_name]
+
+        while stack:
+            node = stack.pop()
+            for dependent in self._reverse_graph.get(node, ()):
+                if dependent not in visited:
+                    visited.add(dependent)
+                    stack.append(dependent)
+
+        return [t for t in self.topologically_sorted if t in visited]
 
     def add(self, *tasks: "Task") -> "Pipeline":
         """
@@ -166,7 +179,6 @@ class Pipeline:
         """
         failed_deps = set(task.dependencies).intersection(self.failures)
         if failed_deps != set():
-            #msg = f"Failed dependencies: {failed_deps}"
             return True
         return False
 
@@ -182,7 +194,7 @@ class Pipeline:
             t = task_lookup[task_name]
             return t
         except KeyError as e:
-            raise KeyError(f"No such task: {task_name}") from e
+            raise exc.DependencyNotFoundError(f"No such task: {task_name}") from e
 
     def reload_task(self, task_name: str|None = None) -> None:
         """
@@ -483,11 +495,11 @@ class Pipeline:
             with util.process_timer() as _t:
                 # Upstream
                 if upstream:
-                    upstream_tasks = self.get_upstream_tasks(task_name)
+                    upstream_tasks = self.get_upstream(task_name)
                     self.current_run.tasks_total += len(upstream_tasks)
                 # Downstream
                 if downstream:
-                    downstream_tasks = self.get_downstream_tasks(task_name)
+                    downstream_tasks = self.get_downstream(task_name)
                     self.current_run.tasks_total += len(downstream_tasks)
             self.logger.pipeline_info(f"completed in {_t}")
 

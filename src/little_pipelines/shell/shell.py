@@ -33,7 +33,7 @@ from little_pipelines.caching import Cache
 from little_pipelines.messaging import LPLogger, get_logger
 from little_pipelines.pipeline import Pipeline
 
-from .commands import (
+from little_pipelines.shell.commands import (
     CacheCommands,
     ExecutionCommands,
     InspectionCommands,
@@ -55,15 +55,10 @@ class Shell(
     """
 
     prompt = "> "
-
     title = "\nLittle Pipelines Shell"
-
     powered_by = True
-
     console: Console = Console()
-
     logger: LPLogger = get_logger()
-
     _message_verbosity = "normal"
 
     def __init__(
@@ -72,7 +67,6 @@ class Shell(
         cache: Cache | None = None,
     ):
         super().__init__()
-
         self.pipeline = pipeline
         self.cache = cache or pipeline.cache
 
@@ -104,21 +98,11 @@ class Shell(
         return ""
 
     def precmd(self, line: str):
-
-        # allow:
-        #
-        #     list-cache
-        #
-        # as shorthand for:
-        #
-        #     list_cache
-
         line = re.sub(
             r"^\S+",
             lambda m: m.group(0).replace("-", "_"),
             line,
         )
-
         line = re.sub(
             r"^help \S+",
             lambda m: m.group(0).replace("-", "_"),
@@ -132,7 +116,6 @@ class Shell(
             return super().onecmd(line)
 
         except Exception as exc:
-
             error = (
                 f"{exc.__class__.__name__}: "
                 f"{' '.join(map(str, exc.args))}"
@@ -205,28 +188,22 @@ class Shell(
         self.console.print()
 
     def preloop(self):
-
         startup = getattr(self, "startup", None)
-
         if startup is None:
             return self._default_startup()
 
         try:
             startup()
-
         except Exception as exc:
             self._default_startup(exc)
 
     def postloop(self):
-
         shutdown = getattr(self, "shutdown", None)
-
         if shutdown is None:
             return self._default_shutdown()
 
         try:
             shutdown()
-
         except Exception as exc:
             self._default_shutdown(exc)
 
@@ -234,11 +211,9 @@ class Shell(
     # Shell configuration
 
     def do_quiet(self, inp):
-
         """
         Reduce shell logging output.
         """
-
         self._message_verbosity = "quiet"
 
         self.logger.set_verbosity(

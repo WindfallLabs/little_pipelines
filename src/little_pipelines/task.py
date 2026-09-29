@@ -4,7 +4,7 @@ Tasks - The Workers.
 
 import datetime as dt
 import inspect
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from functools import wraps
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -214,14 +214,11 @@ class Task:
         """
         Results created by upstream Tasks that are accessible to this Task.
         """
-        results = []
-        try:
-            for task_name in self.pipeline.get_upstream_tasks(self.name):
-                results.extend(self.cache.get_for_task(task_name))
-        except KeyError as e:
-            pass
-
-        return DependencyDict({r.name: r for r in results})
+        results = {}
+        for task_name in self.pipeline.get_upstream(self.name):
+            for r in self.cache.get_for_task(task_name) or []:
+                results[r.name] = r
+        return DependencyDict(results)
 
     def _validate_outputs(self, results: tuple[Result]) -> None:
         """
@@ -291,10 +288,10 @@ class Task:
             run_if_not_cached (bool): Runs the task if the results are not already cached and
                 returns the results of that process
         """
-        if not allow_stale and not self.is_executed:  # TODO: wip
-            raise Exception()
-        elif allow_stale and not self.is_execute:
-            self.logger.warn(f"Results for {self.name} might be stale")
+        # if not allow_stale and not self.is_executed:  # TODO: wip
+        #     raise Exception()
+        # elif allow_stale and not self.is_executed:
+        #     self.logger.warn(f"Results for {self.name} might be stale")
 
         results: list[Result] | dict[str, Result]
         results = self.cache.get_for_task(self.name)
@@ -352,37 +349,75 @@ class Task:
         Forces the value(s) returned by 'main' into a tuple of Result(s).
 
         Arg:
-            return_values (Any | tuple[Result]): The user's main function must return:
-                - A single value (Any) that will be named after the task
-                - A single Result object which will inherit the task.name
-                - A tuple of Results, which require no additional preparation by this method.
-        """
-        # Handle single value (Result)
-        if (not isinstance(return_values, tuple) or return_values is None) and self.outputs:
-            raise exc.MissingOutputError(f"Nothing returned by Task('{self.name}').main()")
+            return_values (Any | tuple[Result]): The user's main function may return:
+                - A single value (Any). It is wrapped in a Result named after the
+                  Task's sole declared output if exactly one output is declared,
+                  otherwise after the Task itself.
+                - A single Result object, which inherits the task.name if it has none.
+                - A non-empty list or tuple of Results, which are used as-is
+                  (any missing task_name is filled in).
 
-        elif isinstance(return_values, Result):
+        Any other list or tuple (e.g. a plain list of numbers) is treated as a
+        single value, not as a collection of Results. Mixing Results and
+        non-Results in one list or tuple raises a TypeError.
+        """
+        # Nothing returned. Use isinstance rather than `== tuple()`, since
+        # comparing arrays/DataFrames to a tuple yields an ambiguous truth value.
+        is_empty_tuple = isinstance(return_values, tuple) and len(return_values) == 0
+        if (return_values is None or is_empty_tuple) and self.outputs:
+            raise exc.MissingOutputError(
+                f"Nothing returned by Task('{self.name}').main()"
+            )
+
+        # Single Result
+        if isinstance(return_values, Result):
             if not return_values.task_name:
                 return_values.task_name = self.name
-            return_values = (return_values,)
-        
-        # Handle (non-string) Sequence
-        elif isinstance(return_values, Sequence) and not isinstance(return_values, str):
-            if not all(isinstance(item, Result) for item in return_values):
-                raise TypeError("Sequence must contain only Result objects")
+            results = (return_values,)
+
+        # Empty tuple with no declared outputs: nothing to do
+        elif is_empty_tuple:
+            results = ()
+
+        # List/tuple made up entirely of Results
+        elif (
+            isinstance(return_values, (list, tuple))
+            and return_values
+            and all(isinstance(item, Result) for item in return_values)
+        ):
             for rt in return_values:
                 if not rt.task_name:
                     rt.task_name = self.name
-            return_values = tuple(return_values)
-        
-        # Handle single value (Any)
+            results = tuple(return_values)
+
+        # A mix of Results and other objects is almost certainly a mistake
+        elif (
+            isinstance(return_values, (list, tuple))
+            and any(isinstance(item, Result) for item in return_values)
+        ):
+            raise TypeError(
+                f"Task('{self.name}').main() returned a mix of Result and non-Result "
+                "objects. Return either only Results or a single plain value."
+            )
+
+        # Anything else is a single value (including plain lists/tuples, arrays,
+        # DataFrames, etc.)
         else:
-            return_values = (Result(value=return_values, name=self.name, task_name=self.name),)
+            declared = list(self.outputs)
+            result_name = declared[0] if len(declared) == 1 else self.name
+            results = (
+                Result(value=return_values, name=result_name, task_name=self.name),
+            )
 
-        if len(return_values) > len(set([r.name for r in return_values])):
-            raise exc.DuplicateResultsError("")
+        # Duplicate names
+        names = [r.name for r in results]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise exc.DuplicateResultsError(
+                f"Multiple Results have the same name: {duplicates}"
+            )
 
-        return return_values
+        return results
 
     def _cache_and_return_result_data(self, results: tuple[Result]) -> tuple[Any]:
         """
@@ -418,6 +453,8 @@ class Task:
             force (bool): Force the execution of the task (default True)
             raise_errors (bool): 
         """
+        if self._main_func:
+            raise AttributeError(f"Multiple uses of `@Task({self.name}).main` decorator")
 
         @wraps(func)
         def _main_wrapper(*args, **kwargs) -> Any | tuple[Any]:
@@ -430,61 +467,46 @@ class Task:
             ]
             self.logger.task_start(self.name)
 
-            # Process / handle kwargs
-            # NOTE: these options are mostly for use within a shell
-            # Force execution of a task
-            force: bool = kwargs.get("force", True)
-            if force not in (True, False):
-                raise AttributeError("'force' kwarg must be bool")
+            # Pop the control kwargs so they never reach the user's function
+            force = kwargs.pop("force", True)
+            raise_errors = kwargs.pop("raise_errors", True)
+            if not isinstance(force, bool):
+                raise TypeError(f"'force' kwarg must be bool: {force}")
+            if not isinstance(raise_errors, bool):
+                raise TypeError(f"'raise_errors' kwarg must be bool: {raise_errors}")
+            self._raise_errors = raise_errors
 
-            # Ignoring errors allows the pipeline to continue running if some tasks fail
-            raise_errors: bool = kwargs.get("raise_errors", True)
-            if raise_errors not in (True, False):
-                raise AttributeError("'raise_errors' kwarg must be bool")
-            if raise_errors != self._raise_errors:
-                self._raise_errors = raise_errors
-
-            # Clean kwargs
-            kwargs: dict = {k: v for k, v in kwargs.items() if k not in kwargs_allowed}
+            self._executed = False
+            self._has_errors = False
 
             with util.process_timer() as _t:
-                # Attempt to get cached data
-                #if self.use_cached_results:
-                if force is False:
-                    r: list[Result] = self.cache.get_for_task(self.name)
-                    if r is not None:
-                        #self._skipped = True  # TODO: is this skipping?
-                        return r
-
-                # Run the main function
                 try:
-                    return_values: Any | tuple[Result] = func(self, *args, **kwargs)
+                    # Use cached results when allowed
+                    if not force and self.use_cached_results:
+                        cached = self.cache.get_for_task(self.name)
+                        if cached is not None:
+                            self._executed = True
+                            results = [self.cache_read_callback(r) for r in cached]
+                            return results[0] if len(results) == 1 else tuple(results)
+
+                    # Run, normalize, validate, store
+                    return_values = func(self, *args, **kwargs)
+                    results = self._resultify(return_values)
+                    self._validate_outputs(results)
+                    unpacked_data = self._cache_and_return_result_data(results)
+
                 except Exception as e:
                     self._has_errors = True
-                    # self.logger.error(
-                    #     task=self.name,
-                    #     msg=f"Failed to run function 'main/{func.__name__}'"
-                    # )
                     self.logger.error(
                         task=self.name,
-                        msg=f"{e.__class__.__name__}: {e}"
+                        msg=f"{e.__class__.__name__}: {e}",
                     )
-                    if raise_errors is True:
-                        raise e
-                    return  # Aborts the task execution, acts kind of like a `continue`
-
-                # Get the results
-                results: tuple[Result] = self._resultify(return_values)
-
-                # Validate outputs
-                self._validate_outputs(results)
-
-                # Process the returned data as result objects
-                unpacked_data: Any | tuple[Any] = self._cache_and_return_result_data(results)
+                    if raise_errors:
+                        raise
+                    return None  # Aborts the task; acts like a `continue`
 
             self._executed = True
             self.logger.task_complete(self.name, _t)
-
             return unpacked_data
 
         self._main_func = func

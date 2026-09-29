@@ -90,12 +90,12 @@ def test_tasks_are_topologically_sorted(pipeline):
 
 
 def test_upstream_and_downstream_helpers(pipeline):
-    assert pipeline.get_upstream_tasks("C") == [
+    assert pipeline.get_upstream("C") == [
         "A",
         "B",
     ]
 
-    downstream = pipeline.get_downstream_tasks("A")
+    downstream = pipeline.get_downstream("A")
 
     assert "B" in downstream
     assert "C" in downstream
@@ -240,8 +240,6 @@ def test_get_task_by_output_name(cache):
 
 # ==============================================================================
 # Execution
-# ==============================================================================
-
 
 def test_execute_marks_pipeline_complete(pipeline):
     pipeline.execute()
@@ -294,8 +292,6 @@ def test_list_tasks_handles_missing_results(cache):
 
 # ==============================================================================
 # PipelineRun
-# ==============================================================================
-
 
 def test_pipeline_run_tracking(pipeline):
     pipeline.execute()
