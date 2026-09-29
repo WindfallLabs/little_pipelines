@@ -6,7 +6,6 @@ import datetime as dt
 
 from little_pipelines.caching.result import Result
 
-
 # ============================================================================
 # Construction
 # ============================================================================
@@ -17,7 +16,7 @@ def test_init_stores_attributes():
 
     result = Result(
         name="Parcels",
-        data={"a": 1},
+        value={"a": 1},
         task_name="LoadParcels",
         dtype="dict",
         last_updated=now,
@@ -26,7 +25,7 @@ def test_init_stores_attributes():
     )
 
     assert result.name == "Parcels"
-    assert result.data == {"a": 1}
+    assert result.value == {"a": 1}
     assert result.task_name == "LoadParcels"
     assert result.dtype == "dict"
     assert result.last_updated == now
@@ -37,7 +36,7 @@ def test_init_stores_attributes():
 def test_dtype_defaults_from_data():
     result = Result(
         name="Parcels",
-        data={"a": 1},
+        value={"a": 1},
         task_name="LoadParcels",
     )
 
@@ -49,7 +48,7 @@ def test_last_updated_defaults_to_now():
 
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="LoadParcels",
     )
 
@@ -61,7 +60,7 @@ def test_last_updated_defaults_to_now():
 def test_expiry_defaults_to_none():
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="LoadParcels",
     )
 
@@ -71,7 +70,7 @@ def test_expiry_defaults_to_none():
 def test_extra_defaults_to_none():
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="LoadParcels",
     )
 
@@ -81,7 +80,7 @@ def test_extra_defaults_to_none():
 def test_datetime_format_stored():
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="LoadParcels",
     )
 
@@ -98,7 +97,7 @@ def test_equal_results_compare_true():
 
     left = Result(
         name="Parcels",
-        data={"a": 1},
+        value={"a": 1},
         task_name="LoadParcels",
         last_updated=timestamp,
         extra={"x": 1},
@@ -106,7 +105,7 @@ def test_equal_results_compare_true():
 
     right = Result(
         name="Parcels",
-        data={"a": 1},
+        value={"a": 1},
         task_name="LoadParcels",
         last_updated=timestamp,
         extra={"x": 1},
@@ -120,14 +119,14 @@ def test_results_with_different_name_not_equal():
 
     left = Result(
         "One",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=timestamp,
     )
 
     right = Result(
         "Two",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=timestamp,
     )
@@ -140,14 +139,14 @@ def test_results_with_different_task_name_not_equal():
 
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="TaskA",
         last_updated=timestamp,
     )
 
     right = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="TaskB",
         last_updated=timestamp,
     )
@@ -160,14 +159,14 @@ def test_results_with_different_data_not_equal():
 
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=timestamp,
     )
 
     right = Result(
         "Data",
-        data=2,
+        value=2,
         task_name="Task",
         last_updated=timestamp,
     )
@@ -180,7 +179,7 @@ def test_results_with_different_dtype_not_equal():
 
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         dtype="int",
         last_updated=timestamp,
@@ -188,7 +187,7 @@ def test_results_with_different_dtype_not_equal():
 
     right = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         dtype="float",
         last_updated=timestamp,
@@ -200,14 +199,14 @@ def test_results_with_different_dtype_not_equal():
 def test_results_with_different_timestamp_not_equal():
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=dt.datetime(2025, 1, 1),
     )
 
     right = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=dt.datetime(2025, 1, 2),
     )
@@ -218,7 +217,7 @@ def test_results_with_different_timestamp_not_equal():
 def test_results_with_different_expiry_not_equal():
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=dt.datetime(2025, 1, 1),
         expiry=dt.datetime(2025, 2, 1),
@@ -226,7 +225,7 @@ def test_results_with_different_expiry_not_equal():
 
     right = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=dt.datetime(2025, 1, 1),
         expiry=None,
@@ -240,7 +239,7 @@ def test_results_with_different_extra_not_equal():
 
     left = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=timestamp,
         extra={"a": 1},
@@ -248,7 +247,7 @@ def test_results_with_different_extra_not_equal():
 
     right = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
         last_updated=timestamp,
         extra={"a": 2},
@@ -260,7 +259,7 @@ def test_results_with_different_extra_not_equal():
 def test_equality_with_non_result_returns_notimplemented():
     result = Result(
         "Data",
-        data=1,
+        value=1,
         task_name="Task",
     )
 
@@ -275,7 +274,7 @@ def test_equality_with_non_result_returns_notimplemented():
 def test_repr_with_builtin_type():
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="Task",
     )
 
@@ -285,7 +284,7 @@ def test_repr_with_builtin_type():
 def test_repr_with_custom_dtype():
     result = Result(
         name="Parcels",
-        data={},
+        value={},
         task_name="Task",
         dtype="GeoDataFrame",
     )

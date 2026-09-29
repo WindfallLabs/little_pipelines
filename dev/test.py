@@ -4,6 +4,7 @@ Development commands / helpers
 
 from subprocess import run
 
+
 def run_tests() -> None:
     """
     Do pytest stuff

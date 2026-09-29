@@ -1,11 +1,7 @@
 # tests/test_shell_validation.py
 
-from unittest.mock import Mock
 
 import pytest
-
-from little_pipelines.shell import Shell
-
 
 # ============================================================================
 # Pipeline validation

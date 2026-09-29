@@ -3,11 +3,6 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import pytest
-
-from little_pipelines.shell import Shell
-
-
 # ============================================================================
 # Tasks
 # ============================================================================

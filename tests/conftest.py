@@ -5,11 +5,11 @@ Only fixtures that are useful across multiple test modules
 should live here.
 """
 
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, Mock
 
 import pytest
-import little_pipelines as lp
 
+import little_pipelines as lp
 
 # ============================================================================
 # Global test configuration

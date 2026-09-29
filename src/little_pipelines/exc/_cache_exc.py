@@ -3,6 +3,13 @@ Cache-related exceptions
 """
 
 
+class CacheNotSetError(Exception):
+    """
+    A Pipeline or a Task has not been given a Cache.
+    """
+    pass
+
+
 class ResultError(Exception):
     """
     Base class for Result errors.

@@ -2,11 +2,6 @@
 
 from unittest.mock import Mock
 
-import pytest
-
-from little_pipelines.shell import Shell
-
-
 # ============================================================================
 # Cache listing
 # ============================================================================

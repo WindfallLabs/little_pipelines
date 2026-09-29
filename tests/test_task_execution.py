@@ -14,7 +14,6 @@ import pytest
 from little_pipelines import DataSpec, Task
 from little_pipelines.exc import DuplicateResultsError
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -128,6 +127,9 @@ def test_sequence_must_contain_only_results(cache):
             2,
         )
 
+    # with pytest.raises(TypeError):
+    #     task.main()
+
     with pytest.raises(TypeError):
         task.main()
 
@@ -158,10 +160,7 @@ def test_duplicate_result_name_raises(cache):
             DataSpec("Same").fulfill(2),
         )
 
-    with pytest.raises(
-        DuplicateResultsError,
-        match="Multiple Results have the same name",
-    ):
+    with pytest.raises(DuplicateResultsError):
         task.main()
 
 

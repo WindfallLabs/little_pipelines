@@ -12,7 +12,6 @@ from types import ModuleType
 
 from little_pipelines import Task, find_tasks
 
-
 # =============================================================================
 # Direct discovery
 # =============================================================================

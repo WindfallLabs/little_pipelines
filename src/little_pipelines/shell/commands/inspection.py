@@ -4,7 +4,7 @@ Inspection commands for the Little Pipelines shell.
 
 from rich.markdown import Markdown
 
-from little_pipelines.data import DataSpec
+from little_pipelines.dataspec import DataSpec
 
 from ..ui import (
     render_dependency_list,

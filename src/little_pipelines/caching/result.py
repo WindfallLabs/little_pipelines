@@ -19,7 +19,7 @@ class Result:
     def __init__(
         self,
         name: str,
-        data: Any,
+        value: Any,
         task_name: str,
         dtype: str | None = None,
         last_updated: dt.datetime | None = None,
@@ -31,7 +31,7 @@ class Result:
 
         Args:
             name (str): The name and primary identifier of the Result.
-            data (Any): The data to store or that is being retrieved.
+            value (Any): The data to store or that is being retrieved.
             task_name (str): The name of the originating task.
             dtype (str): The name of the datatype.
             last_updated (dt.datetime): The creation or update date.
@@ -40,8 +40,8 @@ class Result:
         """
         self.name = name
         self.task_name = task_name
-        self.data = data
-        self.dtype = dtype if dtype is not None else str(type(data))
+        self.value = value
+        self.dtype = dtype if dtype is not None else str(type(value))
         self.last_updated = last_updated if last_updated is not None else dt.datetime.now()
         self.expiry = expiry
         self.extra = extra
@@ -53,7 +53,7 @@ class Result:
         return (
             self.name == other.name
             and self.task_name == other.task_name
-            and self.data == other.data
+            and self.value == other.value
             and self.dtype == other.dtype
             and self.last_updated == other.last_updated
             and self.expiry == other.expiry

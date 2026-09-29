@@ -10,14 +10,13 @@ from little_pipelines.messaging import (
     DEFAULT_TASK_NAME_LEN,
     FAIL,
     INFO,
-    LPFormatter,
-    LPLogger,
     TASK_COMPLETE,
     TASK_START,
+    LPFormatter,
+    LPLogger,
     Verbosity,
     get_logger,
 )
-
 
 # ============================================================================
 # Verbosity

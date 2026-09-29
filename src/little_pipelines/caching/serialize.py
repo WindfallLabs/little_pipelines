@@ -14,42 +14,42 @@ class Serializer(ABC):
     """
     @classmethod
     @abstractmethod
-    def dumps(self, data: Any) -> bytes:
+    def dumps(self, value: Any) -> bytes:
         """
-        Define how to pickle data.
+        Define how to pickle a value of data.
         """
         ...
 
     @classmethod
     @abstractmethod
-    def loads(self, data: bytes) -> Any:
+    def loads(self, value: bytes) -> Any:
         """
-        Define how to unpickle data.
+        Define how to unpickle a value of data.
         """
         ...
 
 
 class DefaultSerializer(Serializer):
     """Defines the default caching (using pickle)."""
-    def dumps(self, data: Any) -> bytes:
-        """Pickle data."""
-        return pickle.dumps(data)
+    def dumps(self, value: Any) -> bytes:
+        """Pickle value."""
+        return pickle.dumps(value)
 
-    def loads(self, data: bytes) -> Any:
-        """Unpickle data."""
-        return pickle.loads(data)
+    def loads(self, value: bytes) -> Any:
+        """Unpickle value."""
+        return pickle.loads(value)
 
 
 class StrSerializer(Serializer):
-    def dumps(self, data: str) -> bytes:
+    def dumps(self, value: str) -> bytes:
         """Defines how strings get written to the cache."""
         encoding = sys.getdefaultencoding()
-        return data.encode(encoding)
+        return value.encode(encoding)
 
-    def loads(self, data: bytes) -> str:
+    def loads(self, value: bytes) -> str:
         """Defines how strings get read from the cache."""
         encoding = sys.getdefaultencoding()
-        return data.decode(encoding)
+        return value.decode(encoding)
 
 
 __all__ = [

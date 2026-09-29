@@ -4,9 +4,6 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from little_pipelines.shell import Shell
-
-
 # ============================================================================
 # Core execution
 # ============================================================================

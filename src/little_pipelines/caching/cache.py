@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS cache (
     dtype TEXT NOT NULL,
     last_updated TEXT NOT NULL,
     expiry TEXT,
-    data BLOB,
+    value BLOB,
     extra TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cache_task ON cache (task);
@@ -162,7 +162,7 @@ class Cache:
         if mode == "UPSERT":
             self._conn.execute(
                 """
-                INSERT OR REPLACE INTO cache (name, task, dtype, last_updated, expiry, data, extra)
+                INSERT OR REPLACE INTO cache (name, task, dtype, last_updated, expiry, value, extra)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._to_row(result)
@@ -171,13 +171,13 @@ class Cache:
             try:
                 self._conn.execute(
                     """
-                    INSERT INTO cache (name, task, dtype, last_updated, expiry, data, extra)
+                    INSERT INTO cache (name, task, dtype, last_updated, expiry, value, extra)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     self._to_row(result)
                 )
-            except sqlite3.IntegrityError:
-                raise exc.ResultExistsError(f"Result exists in Cache: {result.name}")
+            except sqlite3.IntegrityError as e:
+                raise exc.ResultExistsError(f"Result exists in Cache: {result.name}") from e
         self._conn.commit()
 
         return
@@ -231,15 +231,15 @@ class Cache:
 
             @cache.serializer(str)
             class StrSerializer(Serializer):
-                def dumps(self, data: str) -> bytes:
+                def dumps(self, value: str) -> bytes:
                     '''Defines how strings get written to the cache.'''
                     encoding = sys.getdefaultencoding()
-                    return data.encode(encoding)
+                    return value.encode(encoding)
 
-                def loads(self, data: bytes) -> str:
+                def loads(self, value: bytes) -> str:
                     '''Defines how strings get read from the cache.'''
                     encoding = sys.getdefaultencoding()
-                    return data.decode(encoding)
+                    return value.decode(encoding)
             ```
         """
 
@@ -275,7 +275,7 @@ class Cache:
             result.dtype,
             result.last_updated.strftime(_DATETIME_FMT),
             result.expiry.strftime(_DATETIME_FMT) if result.expiry else None,
-            serializer.dumps(result.data),
+            serializer.dumps(result.value),
             json.dumps(result.extra),
         )
 
@@ -287,7 +287,7 @@ class Cache:
         r = Result(
             name=row["name"],
             task_name=row["task"],
-            data=serializer.loads(row["data"]),
+            value=serializer.loads(row["value"]),
             dtype=row["dtype"],
             last_updated=dt.datetime.strptime(row["last_updated"], _DATETIME_FMT),
             expiry=dt.datetime.strptime(row["expiry"], _DATETIME_FMT) if row["expiry"] else None,

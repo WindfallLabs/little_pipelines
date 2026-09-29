@@ -6,9 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from little_pipelines.data import DataSpec
 from little_pipelines.caching.result import Result
-
+from little_pipelines.dataspec import DataSpec
 
 # ============================================================================
 # Test isolation
@@ -207,7 +206,7 @@ def test_fulfill_uses_data_name_by_default():
     result = data.fulfill("value")
 
     assert result.name == "Parcels"
-    assert result.data == "value"
+    assert result.value == "value"
 
 
 def test_fulfill_accepts_custom_name():
@@ -315,12 +314,6 @@ def test_status_delegates_to_policy():
 # ============================================================================
 # Miscellaneous
 # ============================================================================
-
-
-def test_dependency_name_returns_name():
-    data = DataSpec("Parcels")
-
-    assert data.dependency_name() == "Parcels"
 
 
 def test_unknown_attribute_raises_attribute_error():

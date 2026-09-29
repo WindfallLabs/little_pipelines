@@ -16,8 +16,7 @@ Pipeline behavior.
 
 import pytest
 
-from little_pipelines import Cache, Pipeline, Task
-
+from little_pipelines import Cache, DataSpec, Pipeline, Task
 
 # ==============================================================================
 # Fixtures
@@ -31,39 +30,39 @@ def cache():
 
 @pytest.fixture
 def pipeline(cache):
-    a = Task("A", cache=cache)
+    task_a = Task("A", cache=cache)
 
-    @a.main
+    @task_a.main
     def main_a(t):
         return "a"
 
-    b = Task(
+    task_b = Task(
         "B",
         cache=cache,
         dependencies=["A"],
     )
 
-    @b.main
+    @task_b.main
     def main_b(t):
         return "b"
 
-    c = Task(
+    task_c = Task(
         "C",
         cache=cache,
         dependencies=["B"],
     )
 
-    @c.main
+    @task_c.main
     def main_c(t):
         return "c"
 
-    p = Pipeline(
+    pipeline = Pipeline(
         "Test",
         cache=cache,
     )
-    p.add(a, b, c)
+    pipeline.add(task_a, task_b, task_c)
 
-    return p
+    return pipeline
 
 
 # ==============================================================================
@@ -192,10 +191,13 @@ def test_validate_cycle_detection(cache):
 
 
 def test_validate_result_dependency(cache):
+    data = DataSpec("Data", dtype=list)
+    value = ["What", "ever"]
+
     producer = Task(
         "Producer",
         cache=cache,
-        outputs={"Data": list},
+        outputs=[data],
     )
 
     consumer = Task(
@@ -206,7 +208,7 @@ def test_validate_result_dependency(cache):
 
     @producer.main
     def main_a(t):
-        return t.result([], name="Data")
+        return data.fulfill(value)
 
     @consumer.main
     def main_b(t):
@@ -219,10 +221,11 @@ def test_validate_result_dependency(cache):
 
 
 def test_get_task_by_output_name(cache):
+    data = DataSpec("Parcels", dtype=list)
     t = Task(
         "Producer",
         cache=cache,
-        outputs={"Parcels": list},
+        outputs=[data],
     )
 
     @t.main

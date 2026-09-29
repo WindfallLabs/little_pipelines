@@ -10,14 +10,11 @@ Fous:
 
 import pytest
 
-from little_pipelines import DataSpec, Task
-from little_pipelines import exc
+from little_pipelines import DataSpec, Pipeline, Task, exc
 
 
 # =============================================================================
 # Fixtures
-# =============================================================================
-
 
 @pytest.fixture
 def upstream_task(cache):
@@ -43,15 +40,13 @@ def downstream_task(cache):
 
     @task.main
     def main(t):
-        return t.dependencies["Upstream"].data * 2
+        return t.dependencies["Upstream"].value * 2
 
     return task
 
 
 # =============================================================================
 # Dependency registration
-# =============================================================================
-
 
 def test_string_dependencies_are_normalized():
     task = Task(
@@ -93,13 +88,15 @@ def test_duplicate_dependencies_are_deduplicated():
 
 # =============================================================================
 # Dependency resolution
-# =============================================================================
-
 
 def test_dependency_result_accessible(
+    cache,
     upstream_task,
     downstream_task,
 ):
+    pipeline = Pipeline("Pipeline", cache=cache)
+    pipeline.add(upstream_task, downstream_task)
+
     upstream_task.main()
 
     result = downstream_task.main()
@@ -108,23 +105,24 @@ def test_dependency_result_accessible(
 
 
 def test_dependencies_returns_result_objects(
+    cache,
     upstream_task,
     downstream_task,
 ):
+    pipeline = Pipeline("Pipeline", cache=cache)
+    pipeline.add(upstream_task, downstream_task)
     upstream_task.main()
 
     deps = downstream_task.dependencies
 
-    assert deps["Upstream"].data == 10
+    assert deps["Upstream"].value == 10
     assert deps["Upstream"].task_name == "Upstream"
 
 
 # =============================================================================
 # Dependency failures
-# =============================================================================
 
-
-def test_missing_dependency_raises(cache):
+def test_missing_pipeline_raises(cache):
     task = Task(
         "NoDeps",
         cache=cache,
@@ -134,19 +132,25 @@ def test_missing_dependency_raises(cache):
     )
 
     with pytest.raises(
-        exc.DependencyNotFoundError,
+        exc.PipelineNotSetError,
     ):
         _ = task.dependencies
 
 
-def test_dependency_key_not_in_list_raises(
-    upstream_task,
-    downstream_task,
-):
-    upstream_task.main()
+def test_missing_dependency_raises(cache):
+    pipeline = Pipeline("Test", cache=cache)
+
+    task = Task(
+        "NoDeps",
+        cache=cache,
+        dependencies=[
+            "Ghost",
+        ],
+    )
+
+    pipeline.add(task)
 
     with pytest.raises(
-        KeyError,
-        match="not in Task.dependencies list",
+        exc.DependencyNotFoundError,
     ):
-        _ = downstream_task.dependencies["NotADep"]
+        _ = task.dependencies["Ghost"]

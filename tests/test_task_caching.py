@@ -8,8 +8,7 @@ Focus:
     - Task.get_results()
 """
 
-from little_pipelines import Task
-
+from little_pipelines import DataSpec, Task
 
 # =============================================================================
 # Cached execution
@@ -40,7 +39,7 @@ def test_force_false_uses_cached_results(cache):
 
     # Cached path returns Result objects.
     assert len(cached) == 1
-    assert cached[0].data == 1
+    assert cached[0].value == 1
 
 
 def test_force_true_reruns_task(cache):
@@ -84,7 +83,7 @@ def test_task_writes_result_to_cache(cache):
 
     result = cache.get("Writer")
 
-    assert result.data == 123
+    assert result.value == 123
     assert result.task_name == "Writer"
 
 
@@ -108,7 +107,7 @@ def test_get_results_returns_cached_results(cache):
     results = task.get_results()
 
     assert len(results) == 1
-    assert results[0].data == 42
+    assert results[0].value == 42
 
 
 def test_get_results_named_returns_mapping(cache):
@@ -119,22 +118,13 @@ def test_get_results_named_returns_mapping(cache):
 
     @task.main
     def main(t):
-        return t.result(
-            42,
-            "Answer",
-        )
+        return DataSpec("Answer").fulfill(42)
 
     task.main()
 
-    results = task.get_results(
-        named=True,
-    )
-
-    assert set(results.keys()) == {
-        "Answer",
-    }
-
-    assert results["Answer"].data == 42
+    results = task.get_results(named=True)
+    assert set(results.keys()) == {"Answer"}
+    assert results["Answer"].value == 42
 
 
 # =============================================================================
@@ -151,26 +141,14 @@ def test_get_results_returns_multiple_cached_results(cache):
     @task.main
     def main(t):
         return (
-            t.result(
-                1,
-                "One",
-            ),
-            t.result(
-                2,
-                "Two",
-            ),
+            DataSpec("One").fulfill(1),
+            DataSpec("Two").fulfill(2)
         )
 
     task.main()
 
-    results = task.get_results(
-        named=True,
-    )
+    results = task.get_results(named=True)
 
-    assert set(results.keys()) == {
-        "One",
-        "Two",
-    }
-
-    assert results["One"].data == 1
-    assert results["Two"].data == 2
+    assert set(results.keys()) == {"One", "Two"}
+    assert results["One"].value == 1
+    assert results["Two"].value == 2

@@ -14,7 +14,7 @@ A small, Python-native, local-first data processing toolkit built specifically f
 Our goal is to provide a small set of tools that analysts can use to build reliable and intuitive data processing workflows that are entirely Python-driven.  
 Little Pipelines centers around these simple objects:  
 
-- **Data**: Documented dataset definitions
+- **DataSpec**: Documented dataset definitions/specification
 - **Task**: Basic units of work; function-based
 - **Cache**: SQLite-backed storage for artifacts (Results) that created by and shared between Tasks
 - **Pipeline**: Task orchestrator and dependency manager
@@ -57,7 +57,7 @@ pipeline.execute()
 # Get the result of the task
 r: lp.Result = cache.get("Hello")
 
-print(r.data)  # Unpack the data from the Result: "Hello World"
+print(r.value)  # Unpack the data from the Result: "Hello World"
 
 ```
 
@@ -77,7 +77,7 @@ load_sales = lp.Task(
 
 @load_sales.main
 def main(task):
-    return lp.Data(task.name).fulfill([
+    return lp.DataSpec(task.name).fulfill([
         {"amount": 100},
         {"amount": 250},
         {"amount": 175},
@@ -94,12 +94,12 @@ summarize_sales = lp.Task(
 @summarize_sales.main
 def main(task):
     # Load the Result of another Task
-    sales = task.dependencies["LoadSales"].data
+    sales = task.dependencies["LoadSales"].value
 
     total = sum(row["amount"] for row in sales)
 
     # Return named results
-    return lp.Data(task.name).fulfill({
+    return lp.DataSpec(task.name).fulfill({
         "records": len(sales),
         "total_sales": total,
     })
@@ -118,14 +118,12 @@ pipeline.add(
 
 pipeline.execute()
 
-print(cache.get("SummarizeSales").data)  # "{'records': 3, 'total_sales': 525}"
+print(cache.get("SummarizeSales").value)  # "{'records': 3, 'total_sales': 525}"
 
 ```
 
 
 ### Example 3: Best practice, if not over-engineered
-
-___NOTE: this is currently executing PrepareRidership twice___
 
 ```python
 
@@ -146,13 +144,13 @@ import little_pipelines as lp
 #from my_cache import cache
 
 
-raw_ridership = lp.Data(
+raw_ridership = lp.DataSpec(
     "RawRidership",
     dtype=pd.DataFrame,
     doc="Raw APC export from the transit agency."
 )
 
-monthly_ridership = lp.Data(
+monthly_ridership = lp.DataSpec(
     "MonthlyRidership",
     dtype=pd.DataFrame,
     doc="Cleaned monthly ridership totals."
@@ -163,7 +161,7 @@ monthly_ridership = lp.Data(
 def get(self):
     # This is covered by `monthly_ridership.get_from_cache(cache)`
     # but works as an example
-    return cache.get("MonthlyRidership").data
+    return cache.get("MonthlyRidership").value
 
 
 # ============================================================
@@ -233,16 +231,16 @@ import little_pipelines as lp
 build_report = lp.Task(
     "BuildRidershipReport",
     cache=cache,
-    # Defines that this Task requires Data as processed by some other Task
-    dependencies=[raw_ridership],  # Can be lp.Data or str (name)
+    # Defines that this Task requires DataSpec as processed by some other Task
+    dependencies=[raw_ridership],  # Can be lp.DataSpec or str (name)
     # Set the optional expected ouput(s) for validation
-    outputs=[monthly_ridership],  # Must be lp.Data objects
+    outputs=[monthly_ridership],  # Must be lp.DataSpec objects
 )
 
 
 @build_report.process
 def extract(task):
-    return task.dependencies["RawRidership"].data
+    return task.dependencies["RawRidership"].value
 
 
 @build_report.process

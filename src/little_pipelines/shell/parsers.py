@@ -19,7 +19,6 @@ It should only answer:
 from dataclasses import dataclass
 from typing import Any
 
-
 # ============================================================================
 # Execution
 

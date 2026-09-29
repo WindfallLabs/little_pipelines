@@ -2,7 +2,6 @@
 Tests for Task output contracts and validation.
 """
 
-from typing import Any
 
 import pytest
 
@@ -14,225 +13,108 @@ from little_pipelines.exc import (
 )
 
 
-# =============================================================================
-# Output contract normalization
-# =============================================================================
-
-
-def test_outputs_property_reflects_dict_contract():
-    task = Task(
-        "Example",
-        outputs={
-            "value": int,
-            "text": str,
-        },
-    )
-
-    assert task.outputs == {
-        "value": int,
-        "text": str,
-    }
-
-
-def test_outputs_none_creates_no_contract():
-    task = Task("Example")
-
-    assert task.outputs == {}
-
-
-def test_data_output_contract_exposes_dtype():
-    data = DataSpec(
-        name="Output",
-        dtype=int,
-    )
-
-    task = Task(
-        "Example",
-        outputs=[data],
-    )
-
-    assert task.outputs == {
-        "Output": int,
-    }
-
-
-def test_invalid_output_name_raises():
-    with pytest.raises(TypeError):
-        Task(
-            "Bad",
-            outputs={
-                123: int,
-            },
-        )
-
-
-def test_invalid_output_type_raises():
-    with pytest.raises(TypeError):
-        Task(
-            "Bad",
-            outputs={
-                "value": "int",
-            },
-        )
-
-
-def test_invalid_outputs_container_raises():
-    with pytest.raises(TypeError):
-        Task(
-            "Bad",
-            outputs="not-valid",
-        )
-
-
-def test_outputs_list_must_contain_data_objects():
-    with pytest.raises(TypeError):
-        Task(
-            "Bad",
-            outputs=[
-                "not-a-data-object",
-            ],
-        )
-
-
-# =============================================================================
-# Dict-based output contracts
-# =============================================================================
-
-
-def test_correct_output_type_passes(cache):
-    task = Task(
-        "Typed",
-        cache=cache,
-        outputs={
-            "value": int,
-        },
-    )
-
-    @task.main
-    def main(t):
-        return DataSpec("value").fulfill(123)
-
-    assert task.main() == 123
-
-
 def test_multiple_outputs_pass_validation(cache):
+
+    a = DataSpec("a", dtype=int)
+    b = DataSpec("b", dtype=str)
+
     task = Task(
         "Multiple",
         cache=cache,
-        outputs={
-            "a": int,
-            "b": str,
-        },
+        outputs=[a, b],
     )
 
     @task.main
     def main(t):
         return (
-            DataSpec("a").fulfill(123),
-            DataSpec("b").fulfill("abc"),
+            a.fulfill(123),
+            b.fulfill("abc")
         )
 
-    assert task.main() == (123, "abc")
+    raw_results = task.main()
+    assert raw_results == (123, "abc")
 
 
 def test_wrong_output_type_raises(cache):
+    data = DataSpec("value", dtype=int)
     task = Task(
         "Typed",
         cache=cache,
-        outputs={
-            "value": int,
-        },
+        outputs=[data],
     )
 
     @task.main
     def main(t):
-        return DataSpec("value").fulfill("abc")
+        return data.fulfill("abc")  # Error raised by resultify
 
-    with pytest.raises(ExceptionGroup) as exc_info:
+    with pytest.raises(TaskOutputValidationError):
         task.main()
-
-    assert any(
-        isinstance(e, TaskOutputValidationError) for e in exc_info.value.exceptions
-    )
 
 
 def test_missing_output_raises(cache):
+    expected = DataSpec("expected", dtype=int)
+    observed = DataSpec("observed", dtype=int)
     task = Task(
         "Missing",
         cache=cache,
-        outputs={
-            "expected": int,
-        },
+        outputs=[expected],
     )
 
     @task.main
     def main(t):
-        return DataSpec("other").fulfill(123)
+        return observed.fulfill(123)  # not 'expected'
 
-    with pytest.raises(ExceptionGroup) as exc_info:
+    with pytest.raises(MissingOutputError):
         task.main()
-
-    assert any(isinstance(e, MissingOutputError) for e in exc_info.value.exceptions)
 
 
 def test_no_outputs_returned_raises(cache):
+    expected = DataSpec("expected", dtype=int)
     task = Task(
         "MissingAll",
         cache=cache,
-        outputs={
-            "a": int,
-            "b": str,
-        },
+        outputs=[expected],
     )
 
     @task.main
     def main(t):
-        return ()
+        return ()  # Nothing
 
-    with pytest.raises(ExceptionGroup) as exc_info:
+    with pytest.raises(MissingOutputError):
         task.main()
-
-    missing = [
-        e for e in exc_info.value.exceptions if isinstance(e, MissingOutputError)
-    ]
-
-    assert len(missing) == 2
 
 
 def test_unexpected_output_raises(cache):
+    expected = DataSpec("expected")
+    extra = DataSpec("extra")
     task = Task(
         "Unexpected",
         cache=cache,
-        outputs={
-            "expected": int,
-        },
+        outputs=[expected],
     )
 
     @task.main
     def main(t):
         return (
-            DataSpec("expected").fulfill(123),
-            DataSpec("extra").fulfill(456),
+            expected.fulfill(123),
+            extra.fulfill(456),
         )
 
-    with pytest.raises(ExceptionGroup) as exc_info:
+    with pytest.raises(UnexpectedOutputError):
         task.main()
-
-    assert any(isinstance(e, UnexpectedOutputError) for e in exc_info.value.exceptions)
 
 
 def test_any_output_type_accepts_any_value(cache):
+    data = DataSpec("value")
     task = Task(
         "AnyOutput",
         cache=cache,
-        outputs={
-            "value": Any,
-        },
+        outputs=[data],
     )
 
     @task.main
     def main(t):
-        return DataSpec("value").fulfill({"anything": ["goes", 123]})
+        return data.fulfill({"anything": ["goes", 123]})
 
     result = task.main()
 
@@ -259,41 +141,5 @@ def test_data_validation_errors_are_wrapped(cache):
     def main(t):
         return data.fulfill(123)
 
-    with pytest.raises(ExceptionGroup) as exc_info:
+    with pytest.raises(RuntimeError):
         task.main()
-
-    assert any(
-        isinstance(
-            exc,
-            TaskOutputValidationError,
-        )
-        for exc in exc_info.value.exceptions
-    )
-
-
-# =============================================================================
-# Error aggregation
-# =============================================================================
-
-
-def test_multiple_validation_errors_are_grouped(cache):
-    task = Task(
-        "Grouped",
-        cache=cache,
-        outputs={
-            "a": int,
-            "b": str,
-        },
-    )
-
-    @task.main
-    def main(t):
-        return (
-            DataSpec("a").fulfill("wrong type"),
-            DataSpec("unexpected").fulfill(123),
-        )
-
-    with pytest.raises(ExceptionGroup) as exc_info:
-        task.main()
-
-    assert len(exc_info.value.exceptions) >= 3

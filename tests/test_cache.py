@@ -19,12 +19,11 @@ import pytest
 
 from little_pipelines.caching import Result
 from little_pipelines.caching.serialize import Serializer
-from little_pipelines.pipeline_run import PipelineRun
 from little_pipelines.exc import (
     ResultExistsError,
     ResultNotFoundError,
 )
-
+from little_pipelines.pipeline_run import PipelineRun
 
 # ==============================================================================
 # Result CRUD
@@ -35,16 +34,16 @@ def test_put_and_get_result(cache):
     result = Result(
         name="Example",
         task_name="MyTask",
-        data=123,
+        value=123,
     )
 
     cache.put(result)
 
-    retrieved = cache.get("Example")
+    retrieved: Result = cache.get("Example")
 
     assert retrieved.name == "Example"
     assert retrieved.task_name == "MyTask"
-    assert retrieved.data == 123
+    assert retrieved.value == 123
 
 
 def test_get_missing_result_raises(cache):
@@ -57,7 +56,7 @@ def test_get_raw_rows(cache):
         Result(
             name="Answer",
             task_name="Task",
-            data=42,
+            value=42,
         )
     )
 
@@ -81,7 +80,7 @@ def test_get_supports_name_wildcards(cache):
         Result(
             name="Alpha",
             task_name="Task",
-            data=1,
+            value=1,
         )
     )
 
@@ -89,14 +88,14 @@ def test_get_supports_name_wildcards(cache):
         Result(
             name="Beta",
             task_name="Task",
-            data=2,
+            value=2,
         )
     )
 
     result = cache.get("Al*")
 
     assert result.name == "Alpha"
-    assert result.data == 1
+    assert result.value == 1
 
 
 def test_get_for_task_supports_wildcards(cache):
@@ -104,7 +103,7 @@ def test_get_for_task_supports_wildcards(cache):
         Result(
             name="One",
             task_name="TaskA",
-            data=1,
+            value=1,
         )
     )
 
@@ -112,7 +111,7 @@ def test_get_for_task_supports_wildcards(cache):
         Result(
             name="Two",
             task_name="TaskB",
-            data=2,
+            value=2,
         )
     )
 
@@ -135,7 +134,7 @@ def test_put_invalid_mode_raises(cache):
     result = Result(
         name="Example",
         task_name="Task",
-        data=1,
+        value=1,
     )
 
     with pytest.raises(ValueError):
@@ -149,7 +148,7 @@ def test_put_fail_mode_raises_for_duplicate(cache):
     result = Result(
         name="Example",
         task_name="Task",
-        data=1,
+        value=1,
     )
 
     cache.put(result)
@@ -166,7 +165,7 @@ def test_put_upsert_replaces_existing_result(cache):
         Result(
             name="Value",
             task_name="Task",
-            data=1,
+            value=1,
         )
     )
 
@@ -174,12 +173,12 @@ def test_put_upsert_replaces_existing_result(cache):
         Result(
             name="Value",
             task_name="Task",
-            data=999,
+            value=999,
         ),
         mode="UPSERT",
     )
 
-    assert cache.get("Value").data == 999
+    assert cache.get("Value").value == 999
 
 
 # ==============================================================================
@@ -209,7 +208,7 @@ def test_clear_single_result(cache):
         Result(
             name="Value",
             task_name="Task",
-            data=1,
+            value=1,
         )
     )
 
@@ -223,7 +222,7 @@ def test_clear_by_task_name(cache):
         Result(
             name="One",
             task_name="TaskA",
-            data=1,
+            value=1,
         )
     )
 
@@ -231,7 +230,7 @@ def test_clear_by_task_name(cache):
         Result(
             name="Two",
             task_name="TaskA",
-            data=2,
+            value=2,
         )
     )
 
@@ -245,7 +244,7 @@ def test_clear_with_wildcard(cache):
         Result(
             name="Alpha",
             task_name="Task",
-            data=1,
+            value=1,
         )
     )
 
@@ -253,7 +252,7 @@ def test_clear_with_wildcard(cache):
         Result(
             name="Beta",
             task_name="Task",
-            data=2,
+            value=2,
         )
     )
 
@@ -271,7 +270,7 @@ def test_clear_entire_cache(cache):
         Result(
             name="Value",
             task_name="Task",
-            data=1,
+            value=1,
         )
     )
 
@@ -289,23 +288,23 @@ def test_custom_serializer(cache):
 
     @cache.serializer(complex)
     class ComplexSerializer(Serializer):
-        def dumps(self, data):
-            return str(data).encode()
+        def dumps(self, value):
+            return str(value).encode()
 
-        def loads(self, data):
-            return complex(data.decode())
+        def loads(self, value):
+            return complex(value.decode())
 
     cache.put(
         Result(
             name="ComplexResult",
             task_name="Task",
-            data=complex(1, 2),
+            value=complex(1, 2),
         )
     )
 
     result = cache.get("ComplexResult")
 
-    assert result.data == complex(1, 2)
+    assert result.value == complex(1, 2)
 
 
 def test_get_serializer_returns_default_for_unknown_type(cache):

@@ -43,10 +43,6 @@ class Pipeline:
         self.previous_run: PipelineRun|None = None
         self.current_run: PipelineRun|None = None
 
-        # Registry of task:dependencies
-        self._task_deps: dict[str, list[str]] = {}
-        self._topologically_sorted: TopologicalSorter|None = None
-
         # Optional callback functions
         self._on_complete: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
         self._on_fail: list[tuple[Callable, tuple[Any], dict[Any, Any]]] = []
@@ -72,51 +68,46 @@ class Pipeline:
         return len(self._tasks)
 
     @property
-    def topologically_sorted(self):
+    def dependency_graph(self) -> dict[str, list[str]]:
         """
-        Tasks, sorted by dependencies, calculated once.
+        Unsorted dict of {task: [dependency]}
         """
-        if not self._topologically_sorted:
-           self._topologically_sorted = TopologicalSorter(self._task_deps)
-        return self._topologically_sorted.static_order()
+        return {
+            t.name: [self.get_task(i).name for i in t.dependency_names] for t in self._tasks
+        }
+
+    @property
+    def topologically_sorted(self) -> Generator[str]:
+        """
+        Tasks, sorted by dependencies.
+        """
+        ts = TopologicalSorter(self.dependency_graph)
+        sorted_tasks = ts.static_order()
+        return sorted_tasks
 
     @property
     def tasks(self) -> Generator["Task"]:
         """
         Generates the execution order of tasks based on dependencies.
         """
-        #if not self._task_deps:
-        for task in self._tasks:
-            self._task_deps[task.name] = []
-            for dep_name in task.dependency_names:
-                # Find Task-dependencies
-                #dep_task = self.get_task(dep_name)
-                self._task_deps[task.name].append(dep_name)
-
-        _done = set()  # Assure that only unique tasks are yielded
         for task_name in self.topologically_sorted:
-            task: Task = self.get_task(task_name)
-            if task not in _done:
-                yield task
-            _done.add(task)
+            yield self.get_task(task_name)
 
     def get_upstream_tasks(self, task_name: str) -> list[str]:
         """
-        Return all upstream dependencies of `key` in topological order.
+        Return all upstream dependencies of 'task_name' in topological order.
         """
-        if not self._task_deps:
-            _ = list(self.tasks)
         order = list(self.topologically_sorted)
 
         visited = set()
-        stack = list(self._task_deps.get(task_name, []))
+        stack = list(self.dependency_graph.get(task_name, []))
 
         while stack:
             node = stack.pop()
             if node is None or node in visited:
                 continue
             visited.add(node)
-            stack.extend(self._task_deps.get(node, []))
+            stack.extend(self.dependency_graph.get(node, []))
 
         return [t for t in order if t in visited]
 
@@ -124,34 +115,19 @@ class Pipeline:
         """
         Return all tasks downstream of `task_name` and upstream of those.
         """
-        if not self._task_deps:
-            _ = list(self.tasks)
+        target = task_name
+        downstream = []
+        reverse = {}
+        for k in self.dependency_graph:
+            for d in self.dependency_graph[k]:
+                reverse[d] = k
+        for k in reverse:
+            target = reverse.get(target)
+            if target is not None:
+                downstream.append(target)
+        return downstream
 
-        # Build a reverse graph: each node points to whoever depends on it
-        reverse: dict[str, list[str]] = {k: [] for k in self._task_deps}
-        for task, deps in self._task_deps.items():
-            for dep in deps:
-                if dep is not None:
-                    reverse.setdefault(dep, []).append(task)
-
-        order = list(self.topologically_sorted)
-
-        visited = set()
-        stack = list(reverse.get(task_name, []))
-
-        while stack:
-            node = stack.pop()
-            if node == task_name or node in visited:
-                continue
-            visited.add(node)
-            # keep walking downstream...
-            stack.extend(reverse.get(node, []))
-            # ...and pull in whatever this downstream task itself depends on
-            stack.extend(self._task_deps.get(node, []))
-
-        return [t for t in order if t in visited]
-
-    def add(self, *tasks: "Task") -> None:
+    def add(self, *tasks: "Task") -> "Pipeline":
         """
         Add Tasks to the Pipeline.
         """
@@ -159,7 +135,7 @@ class Pipeline:
             # Relate the pipeline to the task
             task.pipeline = self
             self._tasks.append(task)
-        return
+        return self
 
     def list_tasks(
         self,
@@ -205,8 +181,8 @@ class Pipeline:
         try:
             t = task_lookup[task_name]
             return t
-        except KeyError:
-            raise KeyError(f"No such task: {task_name}")
+        except KeyError as e:
+            raise KeyError(f"No such task: {task_name}") from e
 
     def reload_task(self, task_name: str|None = None) -> None:
         """

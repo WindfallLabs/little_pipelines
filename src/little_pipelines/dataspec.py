@@ -44,6 +44,7 @@ Example
 from collections.abc import Callable
 from typing import Any
 
+from . import exc
 from .caching import Cache, Result
 from .policies import Policy, Status  # TODO: review
 
@@ -161,16 +162,15 @@ class DataSpec:
         Gets the cached Result with the same name as this DataSpec.
         """
         r: Result = cache.get(self.name)
-        value = self.validate(r.data)
+        value = self.validate(r.value)
 
         return value
-
-    def dependency_name(self):  # Recommended by Copilot
-        return self.name
 
     def validate(self, value: Any) -> Any:
         """
         Validate a value using the registered validator.
+
+        If there is no custom validator and dtype is provided, only type is validated.
 
         Returns
         -------
@@ -178,6 +178,8 @@ class DataSpec:
             The validated value.
         """
         if self._validator is None:
+            if self.dtype is not None and not isinstance(value, self.dtype):
+                raise exc.TaskOutputValidationError(f"Expected {self.dtype}, got {type(value)}")
             return value
 
         return self._validator(
@@ -191,8 +193,8 @@ class DataSpec:
     def fulfill(
         self,
         value: Any,
-        # TODO: validate: bool = True,
-        *,
+        #*,
+        validate: bool = True,
         name: str | None = None,
         extra: dict | None = None,
     ) -> "Result":
@@ -220,9 +222,12 @@ class DataSpec:
                 centroids.fulfill(centroid_gdf),
             )
         """
+        if validate:
+            value = self.validate(value)
+
         return Result(
             name=name or self.name,
-            data=value,
+            value=value,
             task_name=None,  # Task will populate this later
             extra=extra,
         )

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 from . import exc, util
 from .caching import Cache, Result
-from .data import DataSpec
+from .dataspec import DataSpec
 from .messaging import get_logger
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ class DependencyDict(dict):
         try:
             return super().__getitem__(key)
         except KeyError as e:
-            raise KeyError(f"Dependency '{key}' not in Task.dependencies list") from e
+            raise exc.DependencyNotFoundError(f"Dependency '{key}' not in Task.dependencies list") from e
 
 
 class Task:
@@ -70,17 +70,21 @@ class Task:
         Args:
             name (str): Unique task name (e.g. MyTask).
             cache (Cache): A Cache object to store outputs.
-            dependencies (list[str|DataSpec]): Names of Results (as produced by other Tasks) required by this Task.
+            dependencies (list[str|DataSpec]): Names of Results (as produced by other Tasks)
+                required by this Task.
             outputs (list[DataSpec]): DataSpec objects expected to be fulfilled.
             manual_execution_only (bool): Tells Pipelines not to run this task (default False).
             ...
         """
         self._name: str = name
+        if not outputs:
+            outputs = []
+        if not all([isinstance(o, DataSpec) for o in outputs]):
+            raise TypeError("Task outputs must be DataSpec objects")
+        self._outputs = outputs
 
-        # User-provided dependency names (technically Result names)
+        # User-provided dependency names (technically DataSpec/Result names)
         self._input_dependencies: list[str | DataSpec] = dependencies or []
-
-        self._output_specs = self._normalize_outputs(outputs)  # TODO: remove?
 
         self.if_upstream_errors = if_upstream_errors
 
@@ -109,7 +113,7 @@ class Task:
         self._pipeline: Pipeline | None = None
         self._raise_errors = True
         # Initialize the cache stuff ....
-        self.cache: Cache = cache
+        self._cache: Cache = cache
         self.use_cached_results = use_cached_results
         self.result_expiry = result_expiry  # NOTE: None
         self._result_names = set()
@@ -121,18 +125,36 @@ class Task:
     # Properties
 
     @property
+    def cache(self) -> Cache:
+        if not self._cache:
+            raise exc.CacheNotSetError("This Task has no Cache")
+        return self._cache
+
+    @cache.setter
+    def cache(self, cache: Cache) -> None:
+        self._cache = cache
+        return
+
+    @property
+    def pipeline(self):
+        """
+        Reference to the Pipeline.
+        """
+        if not self._pipeline:
+            raise exc.PipelineNotSetError("This Task has not be added to a Pipeline")
+        return self._pipeline
+
+    @pipeline.setter
+    def pipeline(self, pipeline: "Pipeline") -> None:
+        self._pipeline = pipeline
+        return
+
+    @property
     def outputs(self) -> dict[str, type]:
         """
         Task outputs.
-
-        Returns the legacy mapping:
-            output_name -> dtype
         """
-
-        return {
-            name: spec["dtype"]
-            for name, spec in self._output_specs.items()
-        }
+        return {spec.name: spec for spec in self._outputs}
 
     @property
     def _script_hash(self):
@@ -192,110 +214,14 @@ class Task:
         """
         Results created by upstream Tasks that are accessible to this Task.
         """
-        deps: dict[str, Result] = {}
-        for dep_name in self.dependency_names:
-            # Get Task by Result name
-            try:
-                dep: Result = self.cache.get(dep_name)
-                deps[dep_name] = dep
-            except exc.ResultNotFoundError as e:
-                raise exc.DependencyNotFoundError(f"'{dep_name}' not in cache") from e
+        results = []
+        try:
+            for task_name in self.pipeline.get_upstream_tasks(self.name):
+                results.extend(self.cache.get_for_task(task_name))
+        except KeyError as e:
+            pass
 
-        return DependencyDict(deps)
-
-    @property
-    def pipeline(self):
-        """
-        Reference to the Pipeline.
-        """
-        return self._pipeline
-
-    @pipeline.setter
-    def pipeline(self, pipeline: "Pipeline") -> None:
-        self._pipeline = pipeline
-        return
-
-    def _normalize_outputs(  # TODO: remove?
-        self,
-        outputs: dict[str, type] | list[DataSpec] | None,
-    ) -> dict[str, dict[str, Any]]:
-        """
-        Normalize Task output declarations into a common structure.
-
-        Returns
-        -------
-        dict
-
-        Example:
-
-            {
-                "Parcels": {
-                    "dtype": GeoDataFrame,
-                    "validator": parcels.validate,
-                    "data": parcels,
-                }
-            }
-
-        Notes
-        -----
-        The returned structure is private framework metadata and
-        should not be exposed directly to users.
-        """
-
-        # Default Task output behavior
-        if outputs is None:
-            return {}
-
-        # ---------------------------------------------------------
-        # DataSpec objects
-
-        if isinstance(outputs, list):
-            specs: dict[str, dict[str, Any]] = {}
-            for data in outputs:
-                if not isinstance(data, DataSpec):
-                    raise TypeError(
-                        "Task outputs lists must contain only "
-                        "DataSpec objects."
-                    )
-
-                specs[data.name] = {
-                    "dtype": data.dtype,
-                    "validator": (
-                        data.validate
-                        if getattr(data, "_validator", None)
-                        else None
-                    ),
-                    "data": data,
-                }
-
-            return specs
-
-        # ---------------------------------------------------------
-        # Legacy dict[str, type]
-
-        if isinstance(outputs, dict):
-            specs: dict[str, dict[str, Any]] = {}
-            for name, dtype in outputs.items():
-                if not isinstance(name, str):
-                    raise TypeError("Output names must be strings.")
-
-                if not isinstance(dtype, type):
-                    raise TypeError(f"Output '{name}' must map to a type.")
-
-                specs[name] = {
-                    "dtype": dtype,
-                    "validator": None,
-                    "data": None,
-                }
-
-            return specs
-
-        raise TypeError(
-            "outputs must be one of:\n"
-            "    None\n"
-            "    dict[str, type]\n"
-            "    list[DataSpec]"
-        )
+        return DependencyDict({r.name: r for r in results})
 
     def _validate_outputs(self, results: tuple[Result]) -> None:
         """
@@ -313,110 +239,47 @@ class Task:
         ExceptionGroup
             One or more output validation failures.
         """
-        if self._output_specs == {}:
+        if not self.outputs:
             return
 
-        errors: list[Exception] = []
-        expected = self._output_specs
         actual = {result.name: result for result in results}
-        expected_names = set(expected.keys())
+        expected_names = set(self.outputs.keys())
         actual_names = set(actual.keys())
 
         # ============================================================
         # Missing outputs
-        # ============================================================
 
         for missing_name in sorted(expected_names - actual_names):
-            errors.append(
-                exc.MissingOutputError(f"Missing output: '{missing_name}'")
-            )
+            raise exc.MissingOutputError(f"Missing output: '{missing_name}'")
 
         # ============================================================
         # Unexpected outputs
 
         for unexpected_name in sorted(actual_names - expected_names):
-            errors.append(
-                exc.UnexpectedOutputError(f"Unexpected output: '{unexpected_name}'")
-            )
+            raise exc.UnexpectedOutputError(f"Unexpected output: '{unexpected_name}'")
+
+        # ============================================================
+        # Duplicate names
+
+        seen = set()
+        duplicates = set()
+        for r in results:
+            if r.name in seen:
+                duplicates.add(r.name)
+            else:
+                seen.add(r.name)
+        if duplicates:
+            raise exc.DuplicateResultsError(f"Multiple Results have the same name: {duplicates}")
 
         # ============================================================
         # Type validation + DataSpec validation
 
         for output_name in (expected_names & actual_names):
             result = actual[output_name]
-            spec = expected[output_name]
-            dtype = spec["dtype"]
-            data_obj = spec["data"]
-
-            # --------------------------------------------------------
-            # Type validation
-
-            if (
-                dtype is not Any
-                and dtype is not None
-                and not isinstance(
-                    result.data,
-                    dtype,
-                )
-            ):
-                dtype_name = getattr(
-                    dtype,
-                    "__name__",
-                    str(dtype),
-                )
-                errors.append(
-                    exc.TaskOutputValidationError(
-                        f"Output '{output_name}' "
-                        f"returned "
-                        f"{type(result.data).__name__}; "
-                        f"expected "
-                        f"{dtype_name}"
-                    )
-                )
-                # Skip deeper validation when the type is wrong.
-                continue
-
-            # --------------------------------------------------------
-            # DataSpec validation
-
-            if data_obj is not None:
-                try:
-                    # Uses DataSpec.validate(...)
-                    data_obj.validate(result.data)
-                except Exception as e:
-                    errors.append(
-                        exc.TaskOutputValidationError(
-                            f"Validation failed for '{output_name}': {e}"
-                        )
-                    )
-
-        # ============================================================
-        # Final
-
-        if errors:
-            raise ExceptionGroup(
-                f"Output validation failed for Task '{self.name}'",
-                errors,
-            )
+            spec = self.outputs[output_name]
+            spec.validate(result.value)
 
         return
-
-    # TODO: remove and replace instances with DataSpec.fulfill(value)
-    def result(self, data: Any, name: str | None = None) -> Result:
-        """
-        Creates a Result object.
-        """
-        # If none, the result name is set to the task name
-        if not name:
-            name = self.name
-
-        r = Result(
-            name=name,
-            data=data,
-            task_name=self.name,
-            # TODO: expiry and extra
-        )
-        return r
 
     # TODO: add run_if_not_cached=False, **run_kwargs
     def get_results(self, named=False) -> list[Result] | dict[str, Result]:
@@ -439,7 +302,7 @@ class Task:
         """
         The default cache-read callback.
         """
-        return cached_result.data
+        return cached_result.value
 
     def on_cache_read(self, func: Callable):
         """
@@ -480,48 +343,47 @@ class Task:
         setattr(self, func.__name__, _process_wrapper)
         return
 
-    def _load_cached_results(self) -> Any | tuple[Any]:  # TODO: or do we WANT the Result objects?
+    def _resultify(self, return_values: Any | tuple[Result]) -> tuple[Result]:
         """
-        Returns all cached data for this task.
-        """
-        if self.cache is None:
-            self.logger.warn(task=self.name, msg="No Cache set.")
-            raise AttributeError("No cache set.")
+        Forces the value(s) returned by 'main' into a tuple of Result(s).
 
-        results: tuple[Any] = tuple([r.data for r in self.cache.get(task_name=self.name)])
-
-        return results
-
-    def _resultify(self, return_values: Any) -> tuple[Result]:
+        Arg:
+            return_values (Any | tuple[Result]): The user's main function must return:
+                - A single value (Any) that will be named after the task
+                - A single Result object which will inherit the task.name
+                - A tuple of Results, which require no additional preparation by this method.
         """
-        Forces the values returned by 'main' into a tuple of results.
-        """
-        # Handle single Result
-        if isinstance(return_values, Result):
+        # Handle single value (Result)
+        if (return_values == tuple() or return_values is None) and self.outputs:
+            raise exc.MissingOutputError(f"Nothing returned by Task('{self.name}').main()")
+
+        elif isinstance(return_values, Result):
             if not return_values.task_name:
                 return_values.task_name = self.name
-            return (return_values,)
+            return_values = (return_values,)
         
-        # Handle Sequence (but not string)
-        if isinstance(return_values, Sequence) and not isinstance(return_values, str):
+        # Handle (non-string) Sequence
+        elif isinstance(return_values, Sequence) and not isinstance(return_values, str):
             if not all(isinstance(item, Result) for item in return_values):
                 raise TypeError("Sequence must contain only Result objects")
-            return tuple(return_values)
+            for rt in return_values:
+                if not rt.task_name:
+                    rt.task_name = self.name
+            return_values = tuple(return_values)
         
-        # Handle any other single value, and inherit task.name
-        return (Result(data=return_values, name=self.name, task_name=self.name),)
+        # Handle single value (Any)
+        else:
+            return_values = (Result(value=return_values, name=self.name, task_name=self.name),)
+
+        if len(return_values) > len(set([r.name for r in return_values])):
+            raise exc.DuplicateResultsError("")
+
+        return return_values
 
     def _cache_and_return_result_data(self, results: tuple[Result]) -> tuple[Any]:
         """
         Handles return values as Results and puts them in the Cache.
         """
-        # Check result names for uniqueness
-        result_names: list[str] = [r.name for r in results]
-        if len(set(result_names)) != len(result_names):
-            raise exc.DuplicateResultsError(
-                f"Multiple Results have the same name: {result_names}"
-            )
-
         unpacked_data: list[Any] = []
         return_data: Any | tuple[Any]
         for result in results:
@@ -531,10 +393,10 @@ class Task:
                 self._has_errors = True
                 self.logger.error(
                     task=self.name,
-                    msg=f"Failed to cache data ({type(result).__name__})"
+                    msg=f"Failed to cache Result ({type(result).__name__})"
                 )
                 self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
-            unpacked_data.append(result.data)
+            unpacked_data.append(result.value)
 
         # Return the contents of the tuple if there's only one  # TODO: good idea?
         if len(unpacked_data) == 1:
@@ -570,6 +432,7 @@ class Task:
             force: bool = kwargs.get("force", True)
             if force not in (True, False):
                 raise AttributeError("'force' kwarg must be bool")
+
             # Ignoring errors allows the pipeline to continue running if some tasks fail
             raise_errors: bool = kwargs.get("raise_errors", True)
             if raise_errors not in (True, False):
@@ -594,26 +457,27 @@ class Task:
                     return_values: Any | tuple[Result] = func(self, *args, **kwargs)
                 except Exception as e:
                     self._has_errors = True
+                    # self.logger.error(
+                    #     task=self.name,
+                    #     msg=f"Failed to run function 'main/{func.__name__}'"
+                    # )
                     self.logger.error(
                         task=self.name,
-                        msg=f"Failed to run function 'main/{func.__name__}'"
+                        msg=f"{e.__class__.__name__}: {e}"
                     )
-                    self.logger.error(task=self.name, msg=f"{e.__class__.__name__}: {e}")
-                    # TODO: print some sort of traceback
                     if raise_errors is True:
                         raise e
-                    return
+                    return  # Aborts the task execution, acts kind of like a `continue`
 
                 # Get the results
                 results: tuple[Result] = self._resultify(return_values)
 
                 # Validate outputs
-                self._validate_outputs(
-                    results
-                )
+                self._validate_outputs(results)
 
                 # Process the returned data as result objects
                 unpacked_data: Any | tuple[Any] = self._cache_and_return_result_data(results)
+
             self._executed = True
             self.logger.task_complete(self.name, _t)
 
