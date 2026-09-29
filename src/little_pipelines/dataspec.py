@@ -42,11 +42,12 @@ Example
 """
 
 from collections.abc import Callable
+from functools import wraps
 from typing import Any
 
 from . import exc
 from .caching import Cache, Result
-from .policies import Policy, Status  # TODO: review
+#from .policies import Policy, Status  # TODO: review
 
 
 class DataSpec:
@@ -75,7 +76,7 @@ class DataSpec:
         source: str | None = None,
         owner: str | None = None,
         tags: list[str] | None = None,
-        policy: Policy | None = None,  # Freshness / invalidation / expiry policy
+        #policy: Policy | None = None,  # Freshness / invalidation / expiry policy
         **kwargs,
     ):
         self.name = name
@@ -93,7 +94,7 @@ class DataSpec:
         self._kwargs = kwargs
 
         # Freshness / invalidation / expiry policy
-        self.policy = policy
+        #self.policy = policy
         
         DataSpec._registry[name] = self
 
@@ -120,13 +121,17 @@ class DataSpec:
 
         Example
         -------
+            d = DataSpec("Name")
 
-            @parcels.validator
-            def validate(data, value):
-                ...
-                return value
+            @d.validator
+            def validate(this: DataSpec, value):
+                assert value == 42, "Wrong!"
         """
-        self._validator = func
+        @wraps(func)
+        def _validation_wrapper(value: Any) -> Any:
+            return func(self, value)
+
+        self._validator = _validation_wrapper
         return func
 
     # ============================================================
@@ -146,11 +151,7 @@ class DataSpec:
                 f"No getter registered for '{self.name}'."
             )
 
-        value = self._getter(
-            self,
-            *args,
-            **kwargs,
-        )
+        value = self._getter(self, *args, **kwargs)
 
         if validate:
             value = self.validate(value)
@@ -166,7 +167,7 @@ class DataSpec:
 
         return value
 
-    def validate(self, value: Any) -> Any:
+    def validate(self, value: Any, validate_dtype=True) -> Any:
         """
         Validate a value using the registered validator.
 
@@ -177,15 +178,14 @@ class DataSpec:
         Any
             The validated value.
         """
-        if self._validator is None:
+        if validate_dtype and self.dtype is not None:
             if self.dtype is not None and not isinstance(value, self.dtype):
-                raise exc.TaskOutputValidationError(f"Expected {self.dtype}, got {type(value)}")
+                raise exc.DataSpecValidationError(f"Expected {self.dtype}, got {type(value)}")
+
+        if not self._validator:
             return value
 
-        return self._validator(
-            self,
-            value,
-        )
+        return self._validator(value)
 
     # ============================================================
     # Result creation
@@ -267,15 +267,15 @@ class DataSpec:
 
     # ============================================================
     # Lifecycle
-    def status(self) -> Status:
+    # def status(self) -> Status:
 
-        if self.policy is None:
+    #     if self.policy is None:
 
-            return Status.unknown(
-                "No policy configured"
-            )
+    #         return Status.unknown(
+    #             "No policy configured"
+    #         )
 
-        return self.policy.check()
+    #     return self.policy.check()
 
     # ============================================================
     # Dunders

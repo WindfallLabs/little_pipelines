@@ -29,6 +29,13 @@ def test_bigtest():
     cache = lp.Cache()
 
     output_a = lp.DataSpec("A", dtype=str)
+
+    @output_a.validator
+    def validate(this: "DataSpec", value):
+        if value != "Result for A":
+            raise this.DataSpecValidationError(f"Bad validation of A: {value}")
+        return value
+
     output_b = lp.DataSpec("B", dtype=int)
     output_c = lp.DataSpec("C", dtype=tuple)
 
@@ -90,7 +97,7 @@ def test_bigtest():
 
     assert task_one.is_executed is True
     assert "A" in cache.keys()
-    assert task_two.is_executed is True  # Broken here
+    assert task_two.is_executed is True
     assert "B" in cache.keys()
     assert task_three.is_executed is True
     assert "C" in cache.keys()

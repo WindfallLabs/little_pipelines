@@ -11,9 +11,9 @@ It should not:
 
 from rich.markdown import Markdown
 
+
 # ============================================================================
 # Task Rendering
-# ============================================================================
 
 def render_task_totals(
     console,
@@ -23,11 +23,9 @@ def render_task_totals(
     """
     Print task/result totals.
     """
-
     console.print(
         f"[b]Total Tasks: [blue]{total_tasks}[/]"
     )
-
     console.print(
         f"[b]Total Results: [blue]{total_results}[/]"
     )
@@ -40,9 +38,7 @@ def render_task_list(
     """
     Print task names and cached-result counts.
     """
-
     for task_name, result_count in tasks:
-
         console.print(
             f"- {task_name} ([green]{result_count}[/])"
         )
@@ -50,7 +46,6 @@ def render_task_list(
 
 # ============================================================================
 # Dependency Rendering
-# ============================================================================
 
 def render_dependency_list(
     console,
@@ -62,27 +57,17 @@ def render_dependency_list(
     """
 
     if not task_names:
-
-        console.print(
-            f"[yellow]No {title.lower()} tasks.[/]"
-        )
-
+        console.print(f"[yellow]No {title.lower()} tasks.[/]")
         return
 
-    console.print(
-        f"[b]{title}[/]"
-    )
+    console.print(f"[b]{title}[/]")
 
     for task_name in task_names:
-
-        console.print(
-            f"  ├─ {task_name}"
-        )
+        console.print(f"  ├─ {task_name}")
 
 
 # ============================================================================
 # Documentation Rendering
-# ============================================================================
 
 def render_task_info(
     console,
@@ -133,7 +118,6 @@ def render_task_info(
 
 # ============================================================================
 # Dataset Rendering
-# ============================================================================
 
 def render_dataset_summary(
     console,
@@ -187,7 +171,6 @@ def render_dataset_summary(
 
 # ============================================================================
 # Cache Rendering
-# ============================================================================
 
 def render_cache_listing(
     console,

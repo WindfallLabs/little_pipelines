@@ -42,6 +42,7 @@ class Pipeline:
 
         self._tasks: list[Task] = []
         self.failures: set = set()
+        self.execution_errors: list[Exception] = []
         self.previous_run: PipelineRun|None = None
         self.current_run: PipelineRun|None = None
 
@@ -362,6 +363,8 @@ class Pipeline:
 
         self.previous_run = self.current_run
         self.current_run = PipelineRun(self.name, _timer._start_dt)
+        # Clear errors
+        self.execution_errors = []
 
         if not force_tasks:
             force_tasks = []  # TODO: deprecate (set this at the task-level)
@@ -386,7 +389,6 @@ class Pipeline:
         )
 
         for task in tasks:
-            #self.logger.task_start(task.name)
             # Handle manual_execution_only tasks (i.e. are not executed by pipeline)
             if task.manual_execution_only is True:
                 #task.is_skipped = True  # TODO: this makes sense right?
@@ -418,15 +420,13 @@ class Pipeline:
             except Exception as e:
                 self.current_run.tasks_failed += 1
                 self.failures.add(task.name)
-                self.logger.error(task=task.name, msg=f"{e.__class__.__name__}: {e}")
-                # TODO: Log full stack?
+                self.execution_errors.append(e)
 
         # ====================================================================
         # Post Execution
 
         self.current_run.tasks_skipped = len([t for t in tasks if t.is_skipped is True])
 
-        self.logger.rule("green")
         _timer.stop()
         self.logger.pipeline_complete(
             f"Ran {self.current_run.tasks_executed}/{self.current_run.tasks_total} "
@@ -452,8 +452,6 @@ class Pipeline:
         if self.cache is not None:
             self.cache.put_run(self.current_run)
 
-        self.logger.rule()
-
         return
 
     def execute_one(
@@ -477,6 +475,8 @@ class Pipeline:
 
         self.previous_run = self.current_run
         self.current_run = PipelineRun(self.name, _timer._start_dt)
+        # Clear errors
+        self.execution_errors = []
 
         try:
             # Get target task
@@ -544,7 +544,12 @@ class Pipeline:
             )
 
         except Exception as e:
-            raise e
+            self.execution_errors.append(e)
+            # raise e
+        # TODO: Log full stack?
+        #finally:
+        #    if raise_errors:
+        #        raise ExceptionGroup("Multiple errors occurred", self.execution_errors)
 
         # Cache the PipelineRun
         self.current_run.stop()

@@ -258,6 +258,10 @@ class LPLogger:
         self._logger.propagate = False
         self._verbosity = Verbosity.NORMAL
 
+        # Hold messages in spinner context
+        self._hold: list[tuple] = []  # (level, msg, task, theme)
+        self._holding = False
+
     # ========================================================================
     # Config
 
@@ -366,6 +370,10 @@ class LPLogger:
         if self.enabled is False:
             return
 
+        if self._holding:
+            self._hold.append((level, msg, task, theme))
+            return
+
         self._ensure_started()
         self._logger.log(
             level,
@@ -409,15 +417,26 @@ class LPLogger:
 
     @contextmanager
     def spinner(self, status_msg: str):
-        with self.console.status(status_msg):
-            yield
+        """
+        Wraps rich.console.Console() to print messages correctly.
+        """
+        self._holding = True
+        try:
+            with self.console.status(status_msg):
+                yield
+        finally:
+            self._holding = False
+            # Flush in order
+            for level, msg, task, theme in self._hold:
+                self._emit(level, msg, task, theme)
+            self._hold.clear()
 
-    def rule(self, color="yellow"):
+    def rule(self, color="yellow", title=None):
         """
         Properly print a rich.console.rule.
         """
         self.stop()
-        self.console.rule(style=Style(color=color))
+        self.console.rule(title=title, style=Style(color=color))
         return
 
     def print(
@@ -504,6 +523,8 @@ class LPLogger:
         )
 
     def pipeline_complete(self, msg: str):
+        self.stop()
+        self.rule(color="bright_black")
         self._emit(
             logging.INFO,
             msg,

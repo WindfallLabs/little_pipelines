@@ -7,6 +7,7 @@ import pytest
 
 from little_pipelines import DataSpec, Task
 from little_pipelines.exc import (
+    DataSpecValidationError,
     MissingOutputError,
     TaskOutputValidationError,
     UnexpectedOutputError,
@@ -45,9 +46,9 @@ def test_wrong_output_type_raises(cache):
 
     @task.main
     def main(t):
-        return data.fulfill("abc")  # Error raised by resultify
+        return data.fulfill("abc")
 
-    with pytest.raises(TaskOutputValidationError):
+    with pytest.raises(DataSpecValidationError):
         task.main()
 
 

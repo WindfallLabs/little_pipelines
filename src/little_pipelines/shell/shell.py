@@ -183,8 +183,7 @@ class Shell(
             )
 
         self.logger.stop()
-
-        self.console.rule(style="yellow")
+        #self.console.rule(style="yellow")
         self.console.print()
 
     def preloop(self):

@@ -8,7 +8,9 @@ from ._cache_exc import (
     ResultNotFoundError,
 )
 
-#from ._data_exc import *  # TODO: make or remove
+from ._data_exc import (
+    DataSpecValidationError,
+)
 from ._pipeline_exc import (
     CircularDependencyError,
     DuplicateTaskError,

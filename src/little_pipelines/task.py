@@ -338,7 +338,7 @@ class Task:
             self.logger.process_start(self.name, func.__name__)
             with util.process_timer() as _t:
                 with self.logger.spinner(f"{self.name}: Running {func.__name__}..."):
-                    result = func(self, *args, **kwargs)  # TODO: indent
+                    result = func(self, *args, **kwargs)
             return result
 
         setattr(self, func.__name__, _process_wrapper)
