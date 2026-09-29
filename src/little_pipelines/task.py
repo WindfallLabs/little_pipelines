@@ -281,8 +281,7 @@ class Task:
 
         return
 
-    # TODO: add run_if_not_cached=False, **run_kwargs
-    def get_results(self, named=False) -> list[Result] | dict[str, Result]:
+    def get_results(self, named=False, allow_stale=False) -> list[Result] | dict[str, Result]:
         """
         Gets the Task's result(s).
 
@@ -292,6 +291,11 @@ class Task:
             run_if_not_cached (bool): Runs the task if the results are not already cached and
                 returns the results of that process
         """
+        if not allow_stale and not self.is_executed:  # TODO: wip
+            raise Exception()
+        elif allow_stale and not self.is_execute:
+            self.logger.warn(f"Results for {self.name} might be stale")
+
         results: list[Result] | dict[str, Result]
         results = self.cache.get_for_task(self.name)
         if named:
@@ -354,7 +358,7 @@ class Task:
                 - A tuple of Results, which require no additional preparation by this method.
         """
         # Handle single value (Result)
-        if (return_values == tuple() or return_values is None) and self.outputs:
+        if (not isinstance(return_values, tuple) or return_values is None) and self.outputs:
             raise exc.MissingOutputError(f"Nothing returned by Task('{self.name}').main()")
 
         elif isinstance(return_values, Result):

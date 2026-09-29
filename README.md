@@ -34,28 +34,28 @@ import little_pipelines as lp
 cache = lp.Cache()
 
 # Define the task
-hello = lp.Task(
+hello_task = lp.Task(
     "Hello",
     cache=cache,  # Persist the results
 )
 
 
 # Define the work that the task will do as a wrapped function
-@hello.main  # Essentially makes the function a method, with added magic
+@hello_task.main  # Essentially makes the function a method, with added magic
 def main(task):
     return "Hello World"  # Return some result
 
 
 # Create the pipeline and add the Task
 pipeline = lp.Pipeline("Example Pipeline")
-pipeline.add(hello)
+pipeline.add(hello_task)
 
 # Execute the pipeline
 # This sorts Tasks and calls the `main` method of each (like defined above)
 pipeline.execute()
 
 # Get the result of the task
-r: lp.Result = cache.get("Hello")
+r = hello_task.get_results()[0]
 
 print(r.value)  # Unpack the data from the Result: "Hello World"
 
