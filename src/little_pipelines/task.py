@@ -94,7 +94,8 @@ class Task:
         self._process_times = []
         self._executed = False
         self._skipped = False
-        self._has_errors = False
+        self._errors: list[Exception] = []
+        #self._has_errors = False
 
         self._main_func: Callable | None = None
 
@@ -196,6 +197,10 @@ class Task:
             # TODO: not sure what other callbacks are useful here
         
         return
+
+    @property
+    def has_errors(self):
+        return len(self._errors) > 0
 
     @property
     def has_main(self):
@@ -478,6 +483,7 @@ class Task:
 
             self._executed = False
             self._has_errors = False
+            self._errors.clear()
 
             with util.process_timer() as _t:
                 try:
@@ -496,7 +502,8 @@ class Task:
                     unpacked_data = self._cache_and_return_result_data(results)
 
                 except Exception as e:
-                    self._has_errors = True
+                    #self._has_errors = True
+                    self._errors.append(e)
                     self.logger.error(
                         task=self.name,
                         msg=f"{e.__class__.__name__}: {e}",

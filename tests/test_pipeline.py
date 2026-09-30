@@ -290,6 +290,100 @@ def test_list_tasks_handles_missing_results(cache):
     ]
 
 
+def test_execute_skips_manual_only_tasks(cache):
+    auto_task = Task(
+        "Auto",
+        cache=cache,
+    )
+
+    @auto_task.main
+    def main_auto(t):
+        return "auto"
+
+    manual_task = Task(
+        "Manual",
+        cache=cache,
+    )
+    manual_task.manual_execution_only = True
+
+    @manual_task.main
+    def main_manual(t):
+        pytest.fail("Manual-only task should not be executed by Pipeline.execute()")
+
+    pipeline = Pipeline(
+        "Test",
+        cache=cache,
+    )
+    pipeline.add(auto_task, manual_task)
+
+    pipeline.execute()
+
+    assert auto_task.is_executed is True
+    assert manual_task.is_executed is False
+
+    # Manual-only tasks are excluded from pipeline totals
+    assert pipeline.current_run.tasks_total == 1
+    assert pipeline.current_run.tasks_executed == 1
+
+
+def test_execute_records_task_failures(cache):
+    task = Task(
+        "Explodes",
+        cache=cache,
+    )
+
+    @task.main
+    def main(t):
+        raise RuntimeError("boom")
+
+    pipeline = Pipeline(
+        "Test",
+        cache=cache,
+    )
+    pipeline.add(task)
+
+    pipeline.execute()
+
+    assert pipeline.current_run.tasks_failed == 1
+    assert "Explodes" in pipeline.failures
+
+    assert len(pipeline.execution_errors) == 1
+    assert isinstance(
+        pipeline.execution_errors[0],
+        RuntimeError,
+    )
+    assert str(pipeline.execution_errors[0]) == "boom"
+
+
+def test_execute_records_task_failures_dont_raise(cache):
+    task = Task(
+        "Explodes",
+        cache=cache,
+    )
+
+    @task.main
+    def main(t):
+        raise RuntimeError("boom")
+
+    pipeline = Pipeline(
+        "Test",
+        cache=cache,
+    )
+    pipeline.add(task)
+
+    pipeline.execute(raise_errors=False)
+
+    assert pipeline.current_run.tasks_failed == 1
+    assert "Explodes" in pipeline.failures
+
+    assert len(pipeline.execution_errors) == 1
+    assert isinstance(
+        pipeline.execution_errors[0],
+        RuntimeError,
+    )
+    assert str(pipeline.execution_errors[0]) == "boom"
+
+
 # ==============================================================================
 # PipelineRun
 

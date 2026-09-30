@@ -412,15 +412,19 @@ class Pipeline:
 
                 # Execute
                 result: Any = task.main(raise_errors=raise_errors)
-                # TODO: type-check the expected result with the actual using task.outputs
-                if result is None:
-                    self.logger.warn(task=task.name, msg="Result is None")
-                self.current_run.tasks_executed += 1
 
             except Exception as e:
+                pass
+
+            if task.has_errors:
                 self.current_run.tasks_failed += 1
                 self.failures.add(task.name)
-                self.execution_errors.append(e)
+                self.execution_errors.extend(task._errors)
+            else:
+                if result is None:
+                    self.logger.warn(task=task.name, msg="Result is None")
+
+                self.current_run.tasks_executed += 1
 
         # ====================================================================
         # Post Execution
