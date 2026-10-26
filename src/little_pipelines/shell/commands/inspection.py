@@ -311,7 +311,7 @@ class InspectionCommands:
 
         task_name = inp.split()[0]
         try:
-            result = self.cache.get(task_name).data
+            result = self.cache.get(task_name).value
         except KeyError:
             self.logger.shell_fail(f"No cached result for '{task_name}'")
 
