@@ -163,6 +163,9 @@ class Shell(
             f"[bright_blue]{self.pipeline.name}[/]"
         )
 
+        with self.console.status("Connecting to cache..."):
+            self.cache._setup_database()
+
         self.console.print("[green]Ready.[/]")
 
         if err:

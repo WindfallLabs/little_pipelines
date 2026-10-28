@@ -60,8 +60,6 @@ class Cache:
         self._conn: sqlite3.Connection | None = None
         self.is_uri = False
 
-        self._setup_database()
-
         # Serialization and rules
         self._serializers = {}
         self._default_serializer = DefaultSerializer()  # Pickle
@@ -69,10 +67,18 @@ class Cache:
         self._serializers[str(bytes)] = self._default_serializer
         self._serializers[str(str)] = StrSerializer()
 
+    @property
+    def is_connected(self):
+        return not self._conn is None
+
     def _setup_database(self) -> None:
         """
         Ensures that all tables exist and options are set.
+        Allows the Cache to be instantiated without connecting. Call before other methods.
         """
+        if self.is_connected:
+            return
+
         if self._database_path in ("memory", ":memory:"):
             # Creates a shared in-memory database
             self.database_path = "file:cachedb?mode=memory"  # TODO: &cache=shared ?
@@ -99,6 +105,7 @@ class Cache:
         """
         Get a Result from the cache.
         """
+        self._setup_database()
         # Allow * wildcards ('*' -> '%')
         result_name = result_name.replace("*", "%") if "*" in result_name else result_name
 
@@ -127,6 +134,7 @@ class Cache:
         """
         Return all Results for a given Task.
         """
+        self._setup_database()
         # Allow * wildcards ('*' -> '%')
         task_name = task_name.replace("*", "%") if "*" in task_name else task_name
 
@@ -153,6 +161,7 @@ class Cache:
             result
             mode (
         """
+        self._setup_database()
         if type(result) is not Result:
             raise TypeError("This method only accepts Result objects")
 
@@ -186,6 +195,7 @@ class Cache:
         """
         Return the names of data within the cache.
         """
+        self._setup_database()
         rows = self._conn.execute("SELECT name FROM cache").fetchall()
         return sorted([i[0] for i in rows])
 
@@ -193,6 +203,7 @@ class Cache:
         """
         Clear a record from the cache, or rebuilds the cache table.
         """
+        self._setup_database()
         if name:
             name = name.replace("*", "%")
             try:
@@ -300,7 +311,8 @@ class Cache:
         """
         Close the database connection.
         """
-        self._conn.close()
+        if self._conn:
+            self._conn.close()
         return
 
     # ========================================================================
@@ -309,6 +321,7 @@ class Cache:
         """
         Store a PipelineRun.
         """
+        self._setup_database()
         record = run.to_record()
 
         self._conn.execute(
@@ -344,6 +357,7 @@ class Cache:
         """
         Return PipelineRuns ordered newest-first.
         """
+        self._setup_database()
         cursor = self._conn.cursor()
 
         if pipeline_name:
@@ -386,6 +400,7 @@ class Cache:
         """
         Return the most recent PipelineRun.
         """
+        self._setup_database()
 
         runs = self.get_runs(
             pipeline_name=pipeline_name
@@ -400,6 +415,8 @@ class Cache:
         """
         Delete stored PipelineRun records.
         """
+        self._setup_database()
+
         if pipeline_name:
             self._conn.execute(
                 """
