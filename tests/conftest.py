@@ -37,6 +37,7 @@ def cache():
     constructing Cache objects themselves.
     """
     cache = lp.Cache()
+    cache._setup_database()
 
     yield cache
 

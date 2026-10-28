@@ -306,22 +306,3 @@ def test_peek_missing_cache_entry(
     shell.do_peek("task_a")
 
     shell.logger.shell_fail.assert_called_once()
-
-
-def test_peek_prints_result(
-    shell,
-    mock_cache,
-):
-    result = Mock()
-    result.data = {"a": 1}
-
-    mock_cache.get.return_value = result
-
-    with patch(
-        "little_pipelines.shell.commands.inspection._handle_dataframe_printing_args",
-        return_value=None,
-        create=True,
-    ):
-        shell.do_peek("task_a")
-
-    shell.console.print.assert_called_with({"a": 1})

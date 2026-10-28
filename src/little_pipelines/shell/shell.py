@@ -164,7 +164,7 @@ class Shell(
         )
 
         with self.console.status("Connecting to cache..."):
-            self.cache._setup_database()
+            self.cache._setup_database()  # NOTE: likely already called by a Task
 
         self.console.print("[green]Ready.[/]")
 

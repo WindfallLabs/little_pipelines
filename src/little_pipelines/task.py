@@ -115,6 +115,9 @@ class Task:
         self._raise_errors = True
         # Initialize the cache stuff ....
         self._cache: Cache = cache
+        # Connect to the Cache
+        if self._cache:
+            self._cache._setup_database()
         self.use_cached_results = use_cached_results
         self.result_expiry = result_expiry  # NOTE: None
         self._result_names = set()

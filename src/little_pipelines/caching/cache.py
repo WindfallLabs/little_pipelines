@@ -71,12 +71,12 @@ class Cache:
     def is_connected(self):
         return not self._conn is None
 
-    def _setup_database(self) -> None:
+    def _setup_database(self, force: bool = False) -> None:
         """
         Ensures that all tables exist and options are set.
         Allows the Cache to be instantiated without connecting. Call before other methods.
         """
-        if self.is_connected:
+        if self.is_connected and not force:
             return
 
         if self._database_path in ("memory", ":memory:"):
@@ -221,8 +221,9 @@ class Cache:
                 return False
         else:
             _ = self._conn.execute("DROP TABLE cache;").fetchall()
-            _ = self._setup_database()
-            return True
+        _ = self._setup_database(True)
+        return True
+
 
     def serializer(self, type_arg: type) -> Callable:
         """

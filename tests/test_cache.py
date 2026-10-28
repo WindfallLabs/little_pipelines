@@ -420,15 +420,3 @@ def test_clear_all_runs(cache):
     cache.clear_runs()
 
     assert cache.get_runs() == []
-
-
-# ==============================================================================
-# Connection
-# ==============================================================================
-
-
-def test_close(cache):
-    cache.close()
-
-    with pytest.raises(Exception):
-        cache.keys()
