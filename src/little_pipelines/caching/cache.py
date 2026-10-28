@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import sqlite3
 from collections.abc import Callable
+from functools import wraps
 from pathlib import Path
 from typing import Any, Literal
 
@@ -71,10 +72,22 @@ class Cache:
     def is_connected(self):
         return not self._conn is None
 
+    @staticmethod
+    def connected(method):
+        """
+        Wraps methods that require a connection; ensures the connection and other attributes are ready.
+        """
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            # Run self._setup_database before the wrapped method called
+            if not self.is_connected:
+                self._setup_database()
+            return method(self, *args, **kwargs)
+        return wrapper
+
     def _setup_database(self, force: bool = False) -> None:
         """
         Ensures that all tables exist and options are set.
-        Allows the Cache to be instantiated without connecting. Call before other methods.
         """
         if self.is_connected and not force:
             return
@@ -101,11 +114,11 @@ class Cache:
     # ========================================================================
     # Results
 
+    @connected
     def get(self, result_name: str, return_raw_rows=False) -> Result | list[dict[str, Any]]:
         """
         Get a Result from the cache.
         """
-        self._setup_database()
         # Allow * wildcards ('*' -> '%')
         result_name = result_name.replace("*", "%") if "*" in result_name else result_name
 
@@ -130,11 +143,11 @@ class Cache:
 
         return results[0]
 
+    @connected
     def get_for_task(self, task_name: str) -> list[Result]:
         """
         Return all Results for a given Task.
         """
-        self._setup_database()
         # Allow * wildcards ('*' -> '%')
         task_name = task_name.replace("*", "%") if "*" in task_name else task_name
 
@@ -153,6 +166,7 @@ class Cache:
 
         return results
 
+    @connected
     def put(self, result: Result, mode: Literal["UPSERT", "IGNORE", "FAIL"] = "UPSERT") -> None:
         """
         Insert a Result into the cache.
@@ -161,7 +175,6 @@ class Cache:
             result
             mode (
         """
-        self._setup_database()
         if type(result) is not Result:
             raise TypeError("This method only accepts Result objects")
 
@@ -191,19 +204,19 @@ class Cache:
 
         return
 
+    @connected
     def keys(self) -> list[str]:
         """
         Return the names of data within the cache.
         """
-        self._setup_database()
         rows = self._conn.execute("SELECT name FROM cache").fetchall()
         return sorted([i[0] for i in rows])
 
+    @connected
     def clear(self, name: str | None = None) -> bool:
         """
         Clear a record from the cache, or rebuilds the cache table.
         """
-        self._setup_database()
         if name:
             name = name.replace("*", "%")
             try:
@@ -275,7 +288,6 @@ class Cache:
         """
         return self._serializers.get(dtype, self._default_serializer)
 
-
     def _to_row(self, result: Result) -> tuple:
         """
         Prepares a Result for insert by serializing data and converting data to a tuple.
@@ -318,11 +330,12 @@ class Cache:
 
     # ========================================================================
     # Pipeline Runs
+
+    @connected
     def put_run(self, run: PipelineRun) -> None:
         """
         Store a PipelineRun.
         """
-        self._setup_database()
         record = run.to_record()
 
         self._conn.execute(
@@ -354,11 +367,11 @@ class Cache:
         self._conn.commit()
         return
 
+    @connected
     def get_runs(self, pipeline_name: str | None = None) -> list:
         """
         Return PipelineRuns ordered newest-first.
         """
-        self._setup_database()
         cursor = self._conn.cursor()
 
         if pipeline_name:
@@ -397,12 +410,11 @@ class Cache:
 
         return runs
 
+    @connected
     def get_last_run(self, pipeline_name: str | None = None) -> PipelineRun | None:
         """
         Return the most recent PipelineRun.
         """
-        self._setup_database()
-
         runs = self.get_runs(
             pipeline_name=pipeline_name
         )
@@ -412,12 +424,11 @@ class Cache:
 
         return runs[0]
 
+    @connected
     def clear_runs(self, pipeline_name: str | None = None) -> None:
         """
         Delete stored PipelineRun records.
         """
-        self._setup_database()
-
         if pipeline_name:
             self._conn.execute(
                 """
