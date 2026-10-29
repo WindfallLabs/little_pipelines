@@ -66,6 +66,12 @@ class ExecutionCommands:
 
     def do_execute(self, inp: str) -> None:
         """
+        Alias for run.
+        """
+        self.do_run(inp)
+
+    def do_run(self, inp: str) -> None:
+        """
         Execute tasks.
 
         Examples
@@ -80,12 +86,6 @@ class ExecutionCommands:
         self.logger.rule(title="Pipeline", color="green")
         self._execute(inp)
         self.logger.rule(color="green")
-
-    def do_run(self, inp: str) -> None:
-        """
-        Alias for execute.
-        """
-        self.do_execute(inp)
 
     def do_show_traceback(self, inp: str = ""):
         """

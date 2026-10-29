@@ -38,6 +38,8 @@ from little_pipelines.shell.commands import (
     ExecutionCommands,
     InspectionCommands,
     ValidationCommands,
+    # Extensions
+    PolarsSQL,
 )
 
 
@@ -46,6 +48,9 @@ class Shell(
     CacheCommands,
     ExecutionCommands,
     ValidationCommands,
+    # Extensions
+    PolarsSQL,
+    # Cmd (last)
     Cmd,
 ):
     """
